@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Face Capture</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="bar">
+        <h1><span data-i18n="app.title">Face Capture</span> <span class="tag" data-i18n="app.tag">Prototype</span></h1>
+        <p class="note" data-i18n="app.note">Everything stays on this device. No transfer, no server.</p>
+
+        <div class="viewopts">
+          <label class="field">
+            <span data-i18n="app.language">Language</span>
+            <select id="locale-select"></select>
+          </label>
+          <label class="field">
+            <span data-i18n="view.mesh">Mesh</span>
+            <select id="mesh-mode">
+              <option value="points" selected data-i18n="view.mesh.points">Points</option>
+              <option value="wire" data-i18n="view.mesh.wire">Points + mesh</option>
+              <option value="off" data-i18n="view.mesh.off">off</option>
+            </select>
+          </label>
+          <label class="field checkbox" data-i18n-title="view.anon.title">
+            <input type="checkbox" id="toggle-anon" />
+            <span data-i18n="view.anon">Anonymous</span>
+          </label>
+          <label class="field checkbox" data-i18n-title="view.light.title">
+            <input type="checkbox" id="toggle-light" />
+            <span data-i18n="view.light">Screen light</span>
+          </label>
+        </div>
+      </header>
+
+      <main>
+        <section class="stage" id="stage">
+          <video id="preview" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+
+          <div class="stage-empty" id="stage-empty">
+            <p data-i18n="stage.empty">Camera not started yet.</p>
+          </div>
+
+          <div class="anon-badge" id="anon-badge" data-i18n="stage.anonBadge" hidden></div>
+
+          <div class="tuned-badge" id="tuned-badge" data-i18n="stage.tunedBadge" hidden></div>
+
+          <div class="prompt" id="prompt" hidden>
+            <div class="prompt-step" id="prompt-step"></div>
+            <div class="prompt-title" id="prompt-title"></div>
+            <div class="prompt-instruction" id="prompt-instruction"></div>
+            <div class="progress"><div class="progress-fill" id="progress-fill"></div></div>
+          </div>
+
+          <div class="sidemark left" id="mark-left"></div>
+          <div class="sidemark right" id="mark-right"></div>
+
+          <div class="hints" id="hints"></div>
+
+          <section class="review" id="review" hidden>
+            <h2 data-i18n="review.title">Check captures</h2>
+            <p class="review-note" id="review-note"></p>
+            <div class="grid" id="review-grid"></div>
+          </section>
+        </section>
+
+        <aside class="panel">
+          <div class="tabs">
+            <button class="tab is-active" data-tab="positions" type="button" data-i18n="tab.positions">Positions</button>
+            <button class="tab" data-tab="debug" type="button" data-i18n="tab.debug">Measurements</button>
+            <button class="tab" data-tab="tuning" type="button" data-i18n="tab.tuning">Thresholds</button>
+          </div>
+
+          <div id="tab-positions">
+            <ol class="poslist" id="poslist"></ol>
+          </div>
+
+          <div id="tab-tuning" hidden>
+            <p class="muted small" data-i18n="tuning.note"></p>
+            <div class="tunebar">
+              <button id="btn-tuning-copy" type="button" class="ghost" data-i18n="tuning.copy">Copy as text</button>
+              <button id="btn-tuning-reset" type="button" class="ghost" data-i18n="tuning.resetAll">Reset all</button>
+            </div>
+            <ol class="tunelist" id="tunelist"></ol>
+          </div>
+
+          <div id="tab-debug" hidden>
+            <h3><span data-i18n="debug.drive">Movement</span> <span class="muted" id="graph-caption"></span></h3>
+            <canvas class="graph" id="graph"></canvas>
+            <div class="legend">
+              <span class="key drive" data-i18n="debug.drive">Movement</span>
+              <span class="key suppress" data-i18n="debug.suppress">Interfering movement</span>
+              <span class="key threshold" data-i18n="debug.threshold">Threshold</span>
+            </div>
+
+            <h3 data-i18n="debug.sideCompare">Side comparison</h3>
+            <div id="sidecompare"></div>
+            <p class="muted small" data-i18n="debug.sideNote"></p>
+
+            <h3 data-i18n="debug.readout">Measurements</h3>
+            <dl class="readout" id="readout"></dl>
+
+            <h3 data-i18n="camera.heading">Camera</h3>
+            <dl class="readout" id="camera-readout"></dl>
+            <p class="muted small" data-i18n="camera.note"></p>
+
+            <h3><span data-i18n="debug.blendshapes">Blendshapes</span> <span class="muted" data-i18n="debug.blendshapesMost">(most active)</span></h3>
+            <div class="bars" id="bars"></div>
+          </div>
+        </aside>
+      </main>
+
+      <footer class="bar controls">
+        <button id="btn-start" type="button" data-i18n="btn.start">Start camera</button>
+        <button id="btn-run" type="button" disabled data-i18n="btn.run">Start recording</button>
+        <button id="btn-shutter" type="button" data-i18n="btn.shutter" hidden>Capture now</button>
+        <button id="btn-skip" type="button" class="ghost" data-i18n="btn.skip" hidden>Skip</button>
+        <button id="btn-export" type="button" data-i18n="btn.export" hidden>Save as ZIP</button>
+
+        <label class="field">
+          <span data-i18n="field.camera">Camera</span>
+          <select id="camera-select" disabled></select>
+        </label>
+        <label class="field" data-i18n-title="field.file.title">
+          <span data-i18n="field.file">Video file</span>
+          <input type="file" id="file-input" accept="video/*" />
+        </label>
+
+        <span class="status" id="status"></span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

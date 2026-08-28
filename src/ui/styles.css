@@ -1,0 +1,819 @@
+:root {
+  --bg: #12151a;
+  --panel: #1a1f27;
+  --line: #2b323d;
+  --fg: #e7ecf3;
+  --muted: #93a0b1;
+  --ok: #4ba97a;
+  --warn: #d8a13a;
+  --bad: #d4614f;
+  --accent: #5b8dd6;
+  --stage-bg: #000;
+  --pill-bg: rgba(0, 0, 0, 0.72);
+  --prompt-grad: linear-gradient(to bottom, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+  color-scheme: dark;
+}
+
+/*
+ * Bildschirmlicht.
+ *
+ * Auf dem Smartphone ist der Bildschirm die einzige verfuegbare Lichtquelle,
+ * und eine Aufnahme bei Zimmerlicht am Abend scheitert sonst schlicht an der
+ * Helligkeitsschwelle. Deshalb kippt hier die gesamte Oberflaeche auf hell -
+ * nicht nur ein weisser Rahmen, sondern jede Flaeche, die leuchten kann.
+ * Die Buehne wird reinweiss, weil sie den groessten Anteil hat.
+ */
+body.lightmode {
+  --bg: #ffffff;
+  --panel: #f1f4f8;
+  --line: #d3d9e2;
+  --fg: #14181f;
+  --muted: #59636f;
+  --ok: #1c7a4a;
+  --warn: #8f6410;
+  --bad: #b03a2b;
+  --accent: #2f6ad0;
+  --stage-bg: #ffffff;
+  --pill-bg: rgba(255, 255, 255, 0.92);
+  --prompt-grad: linear-gradient(to bottom, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0));
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.bar h1 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.tag {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: var(--accent);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  vertical-align: 2px;
+}
+
+.note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+  .panel {
+    max-height: 40dvh;
+  }
+}
+
+.stage {
+  position: relative;
+  background: var(--stage-bg);
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Anonyme Anzeige: Das Videobild verschwindet, die Punktmatrix bleibt.
+   Das Canvas legt zusaetzlich eine deckende Flaeche darueber - zwei
+   unabhaengige Wege, siehe ui/overlay.ts. */
+.stage.anonymous video {
+  opacity: 0;
+}
+
+.anon-badge {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  background: var(--pill-bg);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.anon-badge[hidden] {
+  display: none;
+}
+
+.stage video,
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Die Vorschau der Frontkamera wird gespiegelt, sonst ist sie unbedienbar.
+   Gespeichert wird ausdruecklich ungespiegelt - siehe stills.ts. */
+.stage.mirrored video,
+.stage.mirrored canvas {
+  transform: scaleX(-1);
+}
+
+.stage-empty {
+  color: var(--muted);
+  z-index: 2;
+}
+
+.stage-empty[hidden] {
+  display: none;
+}
+
+.hints {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.hint {
+  background: var(--pill-bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 14px;
+}
+
+.hint.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.hint.bad {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+/* Anweisungsbanner waehrend der Sequenz */
+.prompt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 14px 20px 0;
+  background: var(--prompt-grad);
+  z-index: 4;
+  pointer-events: none;
+  text-align: center;
+}
+
+.prompt[hidden] {
+  display: none;
+}
+
+.prompt-step {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.prompt-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.prompt-instruction {
+  font-size: 16px;
+  color: var(--fg);
+  opacity: 0.85;
+  margin-top: 4px;
+}
+
+.progress {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+  margin: 12px auto 0;
+  max-width: 420px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 90ms linear;
+}
+
+.progress-fill.ready {
+  background: var(--ok);
+}
+
+/* Nachschau */
+.review {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  z-index: 6;
+  overflow: auto;
+  padding: 20px;
+}
+
+.review[hidden] {
+  display: none;
+}
+
+.review h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.review-note {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.card img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  background: #000;
+  display: block;
+}
+
+.card .empty {
+  aspect-ratio: 3 / 4;
+  display: grid;
+  place-items: center;
+  color: var(--bad);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.card .empty.anon {
+  color: var(--muted);
+}
+
+.card-body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+
+.badge.auto {
+  color: var(--ok);
+}
+.badge.manual {
+  color: var(--accent);
+}
+.badge.timeout {
+  color: var(--warn);
+}
+
+/* Positionsliste */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.tab.is-active {
+  background: var(--line);
+  color: var(--fg);
+}
+
+.poslist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  counter-reset: pos;
+}
+
+.poslist li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.poslist li .num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.poslist li.is-current {
+  background: var(--line);
+  color: var(--fg);
+}
+
+.poslist li.is-done {
+  color: var(--fg);
+}
+
+.poslist .mark {
+  font-size: 12px;
+}
+
+.poslist li.is-done .mark {
+  color: var(--ok);
+}
+
+.poslist li.is-missing .mark {
+  color: var(--bad);
+}
+
+.panel {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 12px 16px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.panel h2,
+.panel h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 16px 0 8px;
+  font-weight: 600;
+}
+
+.panel h2:first-child {
+  margin-top: 0;
+}
+
+.readout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.readout dt {
+  color: var(--muted);
+}
+
+.readout dd {
+  margin: 0;
+  text-align: right;
+}
+
+.readout dd.ok {
+  color: var(--ok);
+}
+
+.readout dd.bad {
+  color: var(--bad);
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.barrow {
+  display: grid;
+  grid-template-columns: 130px 1fr 40px;
+  align-items: center;
+  gap: 6px;
+}
+
+.bartrack {
+  height: 8px;
+  background: #0d1015;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.barfill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.controls {
+  border-bottom: none;
+  border-top: 1px solid var(--line);
+}
+
+button {
+  font: inherit;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+button[hidden] {
+  display: none;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+input[type="file"] {
+  font: inherit;
+  font-size: 12px;
+  max-width: 170px;
+  color: var(--muted);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field.checkbox {
+  cursor: pointer;
+}
+
+select {
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 8px;
+  max-width: 240px;
+}
+
+.status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status.bad {
+  color: var(--bad);
+}
+
+/* Ansichtsschalter in der Kopfzeile */
+.viewopts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.small {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Live-Graph */
+.graph {
+  width: 100%;
+  height: 110px;
+  display: block;
+  background: rgba(127, 127, 127, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.key::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  margin-right: 5px;
+  vertical-align: 3px;
+}
+
+.key.drive::before {
+  background: #5b8dd6;
+}
+
+.key.suppress::before {
+  background: #d4614f;
+}
+
+.key.threshold::before {
+  background: var(--warn);
+}
+
+/* Seitenvergleich */
+.cmp {
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
+.cmp-delta {
+  color: var(--fg);
+}
+
+.cmp-track {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  height: 10px;
+}
+
+.cmp-half {
+  background: rgba(127, 127, 127, 0.14);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+}
+
+/* Die linke Haelfte waechst nach innen zur Mitte, die rechte nach aussen -
+   so liest sich die Seitendifferenz als Ungleichgewicht um die Mittelachse. */
+.cmp-half.left {
+  justify-content: flex-end;
+}
+
+.cmp-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.cmp-values {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------- Schwellen */
+
+/* Der Warnhinweis sitzt bewusst im Bild und nicht in der Seitenleiste: Eine
+   Aufnahme mit verstellten Schwellen ist nicht protokollkonform, und das muss
+   sehen, wer aufnimmt - nicht nur, wer den Reiter geoeffnet hat. */
+.tuned-badge {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  background: var(--pill-bg);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.tuned-badge[hidden] {
+  display: none;
+}
+
+.tunebar {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.tunelist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tunelist li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.tunelist li.is-current {
+  border-color: var(--accent);
+}
+
+.tunelist li.is-changed {
+  border-color: var(--warn);
+}
+
+.tunehead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tunehead .num {
+  min-width: 1.6em;
+  text-align: right;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.tunename {
+  flex: 1;
+  font-size: 13px;
+}
+
+.tunereset {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.tunefields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.tunefield {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.tunefield input {
+  /* Auf dem Telefon nicht kleiner: unter 16 px zoomt Safari beim Antippen in
+     das Feld hinein und die Fuehrung verschwindet aus dem Bild. */
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--input-bg, transparent);
+  color: inherit;
+  width: 100%;
+}
+
+.tunefield input.is-changed {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------- Side markers */
+
+/* Outside the mirroring transform on purpose: the letters must stay readable,
+   and which corner they sit in is decided in code, not by CSS. */
+.sidemark {
+  position: absolute;
+  bottom: 10px;
+  z-index: 4;
+  font: 700 22px/1 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  user-select: none;
+}
+
+.sidemark.left {
+  left: 12px;
+}
+
+.sidemark.right {
+  right: 12px;
+}

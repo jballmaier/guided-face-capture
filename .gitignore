@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.vite/
+
+# MediaPipe-Assets werden per `npm run assets` geholt, nicht versioniert
+public/mediapipe/
+
+# Aufnahmen gehoeren unter keinen Umstaenden in die Historie.
+# Auch nicht "nur kurz zum Testen" - eine einmal committete Gesichtsaufnahme
+# bleibt in der Historie, selbst wenn die Datei spaeter geloescht wird.
+*.webm
+*.mp4
+*.mov
+*.jpg
+*.jpeg
+*.png
+recordings/
+testdata/
+
+# Ausnahme: Referenzgrafiken der neun Positionen (keine echten Gesichter)
+!src/assets/positions/*.svg
