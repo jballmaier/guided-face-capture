@@ -38,6 +38,8 @@ export const en = {
   "stage.tunedBadge": "Thresholds changed - not a protocol-conforming capture",
   "stage.step": "Position {number} of {count}",
   "stage.soon": "Next: {instruction}",
+  "stage.captured": "triggered, Next when ready",
+  "stage.wouldTrigger": "would trigger now (dev mode)",
 
   // ----------------------------------------------------------------- Review
   "review.title": "Check captures",
@@ -54,6 +56,7 @@ export const en = {
   "tab.positions": "Positions",
   "tab.debug": "Measurements",
   "tab.tuning": "Thresholds",
+  "poslist.jump": "Jump to this position - the recording keeps running",
 
   // ------------------------------------------------------------- Thresholds
   "tuning.note":
@@ -92,6 +95,7 @@ export const en = {
   "debug.sharpness": "Sharpness",
   "debug.luminance": "Brightness",
   "debug.clipping": "Clipping",
+  "debug.clippingDark": "Crushed blacks",
   "debug.interocular": "Eye distance",
   "debug.interlabial": "Lip gap",
   "debug.position": "Position",
@@ -118,8 +122,15 @@ export const en = {
   "btn.switch": "Switch camera",
   "btn.run": "Start recording",
   "btn.shutter": "Capture now",
+  "btn.next": "Next position",
   "btn.skip": "Skip",
   "btn.export": "Save as ZIP",
+  "flow.auto": "Auto-advance",
+  "flow.auto.title":
+    "Advance automatically on trigger or timeout. Off: the sequence holds each position until Next - room to adjust thresholds against the live signal.",
+  "flow.dev": "Dev mode",
+  "flow.dev.title":
+    "Calibration mode: the sequence holds each position, and the trigger is shown but never fires - watch when it would fire while adjusting thresholds. Runs are marked in the manifest.",
   "field.camera": "Camera",
   "field.file": "Video file",
   "field.file.title":
@@ -136,6 +147,8 @@ export const en = {
   "status.finishing": "Finishing the recording ...",
   "status.packing": "Packing ...",
   "status.saved": "Saved: {total} MB total, of which {video} MB video ({seconds} s)",
+  "status.cropSaving":
+    "a face crop would have saved {percent} % of the stills ({full} to {cropped} MB)",
   "status.repeat": "Repeat",
   "status.error": "Error: {message}",
 

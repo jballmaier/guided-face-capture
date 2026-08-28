@@ -36,6 +36,9 @@ export const LM = {
   /** Nose tip and bridge. */
   noseTip: 1,
   noseBridge: 168,
+  /** Outer face contour at cheek height (face-oval points). */
+  cheekOuterRight: 132,
+  cheekOuterLeft: 361,
 } as const;
 
 function dist(a: Landmark, b: Landmark): number {
@@ -75,6 +78,15 @@ export interface FaceMetrics {
    */
   philtrumToCornerRight: number;
   philtrumToCornerLeft: number;
+  /**
+   * Bridge-to-tip nose length. Nose wrinkling shortens it - the geometric
+   * fallback where `noseSneer` stays silent. Only meaningful relative to the
+   * same face at rest; absolute values vary too much between faces.
+   */
+  noseLength: number;
+  /** Outer contour width at cheek height. Puffed cheeks widen it - same
+   *  caveat: relative to rest, never absolute. */
+  cheekWidth: number;
   /** Interocular distance, normalised units. */
   interocular: number;
 }
@@ -93,8 +105,17 @@ export function faceMetrics(lms: readonly Landmark[]): FaceMetrics | null {
   const mL = at(lms, LM.mouthLeft);
 
   const philtrum = at(lms, LM.lipUpperOuter);
+  const noseB = at(lms, LM.noseBridge);
+  const noseT = at(lms, LM.noseTip);
+  const cheekR = at(lms, LM.cheekOuterRight);
+  const cheekL = at(lms, LM.cheekOuterLeft);
 
-  if (!eyeRU || !eyeRL || !eyeLU || !eyeLL || !lipU || !lipL || !mR || !mL || !philtrum) return null;
+  if (
+    !eyeRU || !eyeRL || !eyeLU || !eyeLL || !lipU || !lipL || !mR || !mL ||
+    !philtrum || !noseB || !noseT || !cheekR || !cheekL
+  ) {
+    return null;
+  }
 
   return {
     eyeOpeningRight: dist(eyeRU, eyeRL) / io,
@@ -103,6 +124,8 @@ export function faceMetrics(lms: readonly Landmark[]): FaceMetrics | null {
     mouthWidth: dist(mR, mL) / io,
     philtrumToCornerRight: dist(philtrum, mR) / io,
     philtrumToCornerLeft: dist(philtrum, mL) / io,
+    noseLength: dist(noseB, noseT) / io,
+    cheekWidth: dist(cheekR, cheekL) / io,
     interocular: io,
   };
 }

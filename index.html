@@ -117,9 +117,18 @@
         <button id="btn-start" type="button" data-i18n="btn.start">Start camera</button>
         <button id="btn-run" type="button" disabled data-i18n="btn.run">Start recording</button>
         <button id="btn-shutter" type="button" data-i18n="btn.shutter" hidden>Capture now</button>
+        <button id="btn-next" type="button" data-i18n="btn.next" hidden>Next position</button>
         <button id="btn-skip" type="button" class="ghost" data-i18n="btn.skip" hidden>Skip</button>
         <button id="btn-export" type="button" data-i18n="btn.export" hidden>Save as ZIP</button>
 
+        <label class="field checkbox" data-i18n-title="flow.auto.title">
+          <input type="checkbox" id="toggle-autoadvance" checked />
+          <span data-i18n="flow.auto">Auto-advance</span>
+        </label>
+        <label class="field checkbox" data-i18n-title="flow.dev.title">
+          <input type="checkbox" id="toggle-devmode" />
+          <span data-i18n="flow.dev">Dev mode</span>
+        </label>
         <label class="field">
           <span data-i18n="field.camera">Camera</span>
           <select id="camera-select" disabled></select>

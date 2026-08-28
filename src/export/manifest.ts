@@ -1,10 +1,13 @@
 import type { CameraProbe } from "../capture/capabilities";
+import type { CropReport } from "./crop";
 import { fileExtensionFor } from "../capture/recorder";
 import { positionSlug, positionLabelIn } from "../protocol/positions";
 import { getLocale } from "../i18n";
 import { tuningReport } from "../protocol/tuning";
 import type { SessionResult } from "../session/session";
+import type { FaceMetrics } from "../vision/geometry";
 import type { ModelInfo } from "../vision/landmarker";
+import type { HeadPose } from "../types";
 
 /**
  * The manifest is the actual record; the images are its attachments.
@@ -22,7 +25,7 @@ import type { ModelInfo } from "../vision/landmarker";
  * Raised when fields change or disappear. New fields alone are not a reason:
  * a reader that does not know them skips them.
  */
-export const MANIFEST_VERSION = 1;
+export const MANIFEST_VERSION = 2;
 
 export interface DeviceInfo {
   userAgent: string;
@@ -41,6 +44,10 @@ export interface ManifestInput {
   analysis: { edge: number };
   /** Target bitrate actually used for the recording. */
   videoBitsPerSecond: number;
+  /** What a face crop would have saved. Null when nothing was measured. */
+  crop: CropReport | null;
+  /** Rest baseline the gates measured against. Null = absolute gating. */
+  rest: { pose: HeadPose; metrics: FaceMetrics } | null;
   isFrontFacing: boolean;
   model: ModelInfo;
   mirrorApplied: boolean;
@@ -56,7 +63,7 @@ export function collectDeviceInfo(): DeviceInfo {
 }
 
 export function buildManifest(input: ManifestInput): Record<string, unknown> {
-  const { session, cameraSettings, cameraProbe, cameraLabel, analysis, videoBitsPerSecond, isFrontFacing, model, mirrorApplied } =
+  const { session, cameraSettings, cameraProbe, cameraLabel, analysis, videoBitsPerSecond, crop, rest, isFrontFacing, model, mirrorApplied } =
     input;
   const videoName = `video.${fileExtensionFor(session.recording.mimeType)}`;
 
@@ -72,6 +79,10 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
        * Empty means measured unchanged; anything here marks a calibration run.
        */
       thresholdsChanged: tuningReport(),
+      /** Auto-advance was off at some point - also a calibration marker. */
+      manualAdvanceUsed: session.manualAdvanceUsed,
+      /** Dev mode (trigger display-only) was on at some point - ditto. */
+      devModeUsed: session.devModeUsed,
     },
     session: {
       /** Display language during the session - explains the instructions shown. */
@@ -109,6 +120,28 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
        * frame. Thresholds are only comparable when this is known.
        */
       analysisEdge: analysis.edge,
+      /**
+       * Measurement only - the exported stills stay uncropped. Per-position
+       * figures sit next to each image; the open protocol question of
+       * client-side cropping hangs on these numbers.
+       */
+      cropEstimate: crop ? { pad: crop.pad, quality: crop.quality, totals: crop.totals } : null,
+      /**
+       * Rest baseline frozen during alignment. The pose gate and the relative
+       * geometry signals measured against it; apex poses stay absolute, so
+       * without this the gating cannot be reconstructed. Null means absolute
+       * gating against the camera axis.
+       */
+      restBaseline: rest
+        ? {
+            pose: {
+              yaw: round(rest.pose.yaw, 2),
+              pitch: round(rest.pose.pitch, 2),
+              roll: round(rest.pose.roll, 2),
+            },
+            metrics: roundMetrics(rest.metrics),
+          }
+        : null,
       // Whether mirroring was applied on saving, and whether the stills carry
       // burnt-in L/R markers. Without both the side of a finding cannot be
       // verified.
@@ -132,6 +165,8 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
         label: positionLabelIn("en", result.spec),
         file: result.still ? `${slug}.jpg` : null,
         image: result.still ? { width: result.still.width, height: result.still.height, bytes: result.still.blob.size } : null,
+        /** What a crop to face box plus margin would have made of the image. */
+        cropEstimate: crop?.perPosition[result.spec.id] ?? null,
         /** Position in the video, so the still can be found there. */
         atMs: result.apex ? Math.round(result.apex.atMs) : null,
         // The thresholds this particular position was measured under.
@@ -153,18 +188,14 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
               quality: {
                 sharpness: round(result.apex.quality.sharpness, 1),
                 luminance: round(result.apex.quality.luminance, 1),
-                clipping: round(result.apex.quality.clipping, 4),
+                clippingBright: round(result.apex.quality.clippingBright, 4),
+                clippingDark: round(result.apex.quality.clippingDark, 4),
                 interocular: round(result.apex.quality.interocular, 4),
                 interocularPx: round(result.apex.quality.interocularPx, 1),
+                boxWidth: round(result.apex.quality.boxWidth, 4),
+                boxHeight: round(result.apex.quality.boxHeight, 4),
               },
-              metrics: {
-                eyeOpeningRight: round(result.apex.metrics.eyeOpeningRight, 4),
-                eyeOpeningLeft: round(result.apex.metrics.eyeOpeningLeft, 4),
-                interlabialGap: round(result.apex.metrics.interlabialGap, 4),
-                mouthWidth: round(result.apex.metrics.mouthWidth, 4),
-                philtrumToCornerRight: round(result.apex.metrics.philtrumToCornerRight, 4),
-                philtrumToCornerLeft: round(result.apex.metrics.philtrumToCornerLeft, 4),
-              },
+              metrics: roundMetrics(result.apex.metrics),
               blendshapes: roundMap(result.apex.blendshapes, 4),
             }
           : null,
@@ -172,6 +203,8 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
           t: Math.round(s.t),
           drive: round(s.drive, 3),
           suppress: round(s.suppress, 3),
+          // Which gate rejected the frame - absent when all gates passed.
+          ...(s.gate ? { gate: s.gate } : {}),
         })),
       };
     }),
@@ -181,6 +214,19 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
 function round(value: number, digits: number): number {
   const f = 10 ** digits;
   return Math.round(value * f) / f;
+}
+
+function roundMetrics(m: FaceMetrics): Record<string, number> {
+  return {
+    eyeOpeningRight: round(m.eyeOpeningRight, 4),
+    eyeOpeningLeft: round(m.eyeOpeningLeft, 4),
+    interlabialGap: round(m.interlabialGap, 4),
+    mouthWidth: round(m.mouthWidth, 4),
+    philtrumToCornerRight: round(m.philtrumToCornerRight, 4),
+    philtrumToCornerLeft: round(m.philtrumToCornerLeft, 4),
+    noseLength: round(m.noseLength, 4),
+    cheekWidth: round(m.cheekWidth, 4),
+  };
 }
 
 function roundMap(map: Readonly<Record<string, number>>, digits: number): Record<string, number> {

@@ -410,6 +410,15 @@ main {
   color: var(--fg);
 }
 
+/* Klickbar nur ohne Auto-Weiterschalten (main.ts setzt die Klasse). */
+.poslist li.is-clickable {
+  cursor: pointer;
+}
+
+.poslist li.is-clickable:hover {
+  background: var(--line);
+}
+
 .poslist li.is-done {
   color: var(--fg);
 }

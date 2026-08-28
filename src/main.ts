@@ -13,7 +13,7 @@ import {
   firstFaceMatrix,
   toBlendshapeMap,
 } from "./vision/landmarker";
-import { poseFromMatrix, poseWithinTolerance, POSE_TOLERANCE } from "./vision/pose";
+import { poseDelta, poseFromMatrix, poseWithinTolerance, POSE_TOLERANCE } from "./vision/pose";
 import { measureQuality, qualityIssues, issueText, QUALITY_THRESHOLDS } from "./vision/quality";
 import { faceMetrics, type FaceMetrics } from "./vision/geometry";
 import {
@@ -24,7 +24,7 @@ import {
   type PositionId,
   type PositionSpec,
 } from "./protocol/positions";
-import type { DetectorSample } from "./protocol/detector";
+import type { DetectorReading, DetectorSample } from "./protocol/detector";
 import { CaptureSession, type PositionResult, type SessionResult } from "./session/session";
 import { buildManifest } from "./export/manifest";
 import { probeCamera, type CameraProbe } from "./capture/capabilities";
@@ -51,6 +51,7 @@ import {
   type TuningKey,
 } from "./protocol/tuning";
 import { buildBundle, downloadBlob } from "./export/bundle";
+import { estimateCropSavings } from "./export/crop";
 import { drawOverlay, highlightFor, type MeshMode } from "./ui/overlay";
 import { StripChart } from "./ui/graph";
 import { renderBars, renderReadout, renderSideCompare, type ReadoutRow, type SideEntry } from "./ui/panel";
@@ -80,6 +81,10 @@ const OVERLAY_EDGE = 1280;
 const BITS_PER_PIXEL = 0.07;
 const MAX_BITRATE = 40_000_000;
 const MIN_BITRATE = 2_000_000;
+
+/** JPEG quality of the stills - the crop measurement re-encodes at the same
+ *  value, or the comparison would measure the quality setting instead. */
+const STILL_QUALITY = 0.92;
 
 function bitrateFor(width: number, height: number, frameRate: number): number {
   const fps = frameRate > 0 ? frameRate : 30;
@@ -146,8 +151,11 @@ const tabDebug = el<HTMLElement>("tab-debug");
 const btnStart = el<HTMLButtonElement>("btn-start");
 const btnRun = el<HTMLButtonElement>("btn-run");
 const btnShutter = el<HTMLButtonElement>("btn-shutter");
+const btnNext = el<HTMLButtonElement>("btn-next");
 const btnSkip = el<HTMLButtonElement>("btn-skip");
 const btnExport = el<HTMLButtonElement>("btn-export");
+const toggleAuto = el<HTMLInputElement>("toggle-autoadvance");
+const toggleDev = el<HTMLInputElement>("toggle-devmode");
 const cameraSelect = el<HTMLSelectElement>("camera-select");
 const fileInput = el<HTMLInputElement>("file-input");
 const meshSelect = el<HTMLSelectElement>("mesh-mode");
@@ -191,7 +199,55 @@ const view = {
   light: false,
 };
 
+/**
+ * Test controls, not view toggles. Auto-advance off: the sequence holds each
+ * position past trigger and timeout until "Next". Dev mode: additionally the
+ * trigger is display-only - it fires visibly but latches nothing, so it can
+ * be watched repeatedly while adjusting thresholds. Both apply to the running
+ * session and to every new one.
+ */
+let autoAdvance = true;
+let devMode = false;
+
+function updateFlowButtons(): void {
+  btnNext.hidden = state !== "running" || (autoAdvance && !devMode);
+}
+
 const fps = { last: 0, value: 0 };
+
+/**
+ * Rest baseline, averaged while the alignment holds and frozen when the
+ * sequence starts. Pose gate and relative geometry then measure against the
+ * person's rest, not against the camera axis - a camera off eye level put the
+ * resting head near the absolute limit and expressions tilted it past
+ * (measured 2026-08-28). Alignment itself keeps gating absolutely, which
+ * bounds how far the frozen rest can sit off the camera.
+ */
+let restPoseAcc: HeadPose | null = null;
+let restMetricsAcc: FaceMetrics | null = null;
+let sessionRest: { pose: HeadPose; metrics: FaceMetrics } | null = null;
+
+const REST_EMA = 0.1;
+const mix = (a: number, b: number): number => a + (b - a) * REST_EMA;
+
+function accumulateRest(pose: HeadPose, metrics: FaceMetrics): void {
+  restPoseAcc = restPoseAcc
+    ? {
+        yaw: mix(restPoseAcc.yaw, pose.yaw),
+        pitch: mix(restPoseAcc.pitch, pose.pitch),
+        roll: mix(restPoseAcc.roll, pose.roll),
+      }
+    : { ...pose };
+  if (restMetricsAcc) {
+    const mixed = { ...restMetricsAcc };
+    for (const key of Object.keys(mixed) as (keyof FaceMetrics)[]) {
+      mixed[key] = mix(restMetricsAcc[key], metrics[key]);
+    }
+    restMetricsAcc = mixed;
+  } else {
+    restMetricsAcc = { ...metrics };
+  }
+}
 
 function setStatus(text: string, bad = false): void {
   status.textContent = text;
@@ -443,6 +499,9 @@ function enterAligning(): void {
   sessionResult = null;
   finishing = false;
   alignOkSince = null;
+  restPoseAcc = null;
+  restMetricsAcc = null;
+  sessionRest = null;
   stageEmpty.hidden = true;
   review.hidden = true;
   prompt.hidden = true;
@@ -451,6 +510,7 @@ function enterAligning(): void {
   btnShutter.hidden = true;
   btnSkip.hidden = true;
   btnExport.hidden = true;
+  updateFlowButtons();
   chart.clear();
   chart.setThreshold(null);
   graphCaption.textContent = t("debug.noPosition");
@@ -476,17 +536,25 @@ function startSequence(): void {
       live.frameRate ?? 30,
     );
 
+    sessionRest =
+      restPoseAcc && restMetricsAcc ? { pose: restPoseAcc, metrics: restMetricsAcc } : null;
+
     session = new CaptureSession(video, stream, {
       // Bitrate and still quality drive the storage footprint directly.
       videoBitsPerSecond: sessionBitrate,
-      still: { quality: 0.92 },
+      still: { quality: STILL_QUALITY },
+      restPose: sessionRest?.pose ?? null,
+      restMetrics: sessionRest?.metrics ?? null,
     });
+    session.setAutoAdvance(autoAdvance);
+    session.setDevMode(devMode);
     session.start();
     state = "running";
     prompt.hidden = false;
     btnRun.hidden = true;
     btnShutter.hidden = false;
     btnSkip.hidden = false;
+    updateFlowButtons();
     chart.clear();
     setStatus(t("status.recording"));
     void updateWakeLock();
@@ -501,6 +569,7 @@ function enterReview(): void {
   btnShutter.hidden = true;
   btnSkip.hidden = true;
   btnExport.hidden = false;
+  updateFlowButtons();
   review.hidden = false;
   chart.setThreshold(null);
   graphCaption.textContent = t("debug.sequenceDone");
@@ -547,6 +616,7 @@ function onFrame(nowMs: number): void {
       : null;
 
   const activeSpec = state === "running" ? (session?.currentSpec ?? null) : null;
+  let readingForPanel: DetectorReading | null = null;
 
   drawOverlay(ctx!, overlay.width, overlay.height, {
     landmarks,
@@ -557,14 +627,50 @@ function onFrame(nowMs: number): void {
     guide: state !== "review",
   });
 
-  const issues = collectIssues(faceCount, pose, quality);
+  const issues = collectIssues(
+    faceCount,
+    pose,
+    quality,
+    state === "running" ? (sessionRest?.pose ?? null) : null,
+  );
 
   if (state === "aligning") {
-    handleAligning(issues, nowMs);
+    handleAligning(issues, nowMs, pose, metrics);
     renderHints(issues);
   } else if (state === "running" && session) {
     const sessionView = session.update(lastSample, nowMs);
-    renderPrompt(sessionView.spec, sessionView.positionNumber, sessionView.positionCount, sessionView.progress, sessionView.phase);
+
+    // The baseline keeps learning through the lead-in of position one: the
+    // person is at rest there by instruction, and the pose they settled into
+    // after clicking start is the one the gates should measure against - the
+    // pose frozen at the click gated a whole neutral run (2026-08-28).
+    if (
+      sessionView.phase === "prepare" &&
+      sessionView.positionNumber === 1 &&
+      pose &&
+      metrics &&
+      collectIssues(faceCount, pose, quality, null).length === 0
+    ) {
+      accumulateRest(pose, metrics);
+      if (restPoseAcc && restMetricsAcc) {
+        sessionRest = { pose: restPoseAcc, metrics: restMetricsAcc };
+        session.setRest(restPoseAcc, restMetricsAcc);
+      }
+    }
+
+    readingForPanel = sessionView.reading;
+
+    // On a held position the trigger state is shown in the prompt: latched in
+    // manual mode, momentary in dev mode (where it fires nothing).
+    const triggeredNow = Boolean(sessionView.reading?.triggered);
+    const promptNote = triggeredNow
+      ? devMode
+        ? t("stage.wouldTrigger")
+        : !autoAdvance
+          ? t("stage.captured")
+          : null
+      : null;
+    renderPrompt(sessionView.spec, sessionView.positionNumber, sessionView.positionCount, sessionView.progress, sessionView.phase, promptNote);
     renderHints(sessionView.phase === "measure" ? issues : []);
     renderPositionList();
     if ((sessionView.spec?.id ?? null) !== tuningRenderedFor) renderTuningPanel();
@@ -588,7 +694,7 @@ function onFrame(nowMs: number): void {
   if (!tabDebug.hidden) {
     chart.setTheme(view.light);
     chart.render(nowMs);
-    renderReadout(readout, readoutRows(faceCount, pose, quality, metrics, activeSpec));
+    renderReadout(readout, readoutRows(faceCount, pose, quality, metrics, activeSpec, readingForPanel));
     renderSideCompare(sideCompare, sideEntries(activeSpec, blendshapes, metrics));
     renderBars(bars, blendshapes, 10);
   }
@@ -598,20 +704,36 @@ function onFrame(nowMs: number): void {
   if (dt > 0) fps.value = fps.value * 0.9 + (1000 / dt) * 0.1;
 }
 
-function collectIssues(faceCount: number, pose: HeadPose | null, quality: FrameQuality | null): string[] {
+function collectIssues(
+  faceCount: number,
+  pose: HeadPose | null,
+  quality: FrameQuality | null,
+  /** Rest pose to measure against; null gates absolutely (alignment phase). */
+  reference: HeadPose | null,
+): string[] {
   if (faceCount === 0) return [issueText("no-face")];
   if (faceCount > 1) return [issueText("multiple-faces")];
   const out = quality ? qualityIssues(quality).map(issueText) : [];
-  if (pose && !poseWithinTolerance(pose, POSE_TOLERANCE)) out.push(issueText("head-tilted"));
+  if (pose) {
+    const gauged = reference ? poseDelta(pose, reference) : pose;
+    if (!poseWithinTolerance(gauged, POSE_TOLERANCE)) out.push(issueText("head-tilted"));
+  }
   return out;
 }
 
-function handleAligning(issues: string[], nowMs: number): void {
+function handleAligning(
+  issues: string[],
+  nowMs: number,
+  pose: HeadPose | null,
+  metrics: FaceMetrics | null,
+): void {
   if (issues.length > 0) {
     alignOkSince = null;
     btnRun.disabled = true;
     return;
   }
+  // Only clean frames feed the rest baseline.
+  if (pose && metrics) accumulateRest(pose, metrics);
   alignOkSince ??= nowMs;
   btnRun.disabled = nowMs - alignOkSince < ALIGN_HOLD_MS;
 }
@@ -639,6 +761,7 @@ function renderPrompt(
   count: number,
   progress: number,
   phase: string,
+  note: string | null = null,
 ): void {
   if (!spec) return;
   promptStep.textContent = t("stage.step", { number, count });
@@ -646,9 +769,11 @@ function renderPrompt(
   promptInstruction.textContent =
     phase === "prepare"
       ? t("stage.soon", { instruction: positionInstruction(spec) })
-      : positionInstruction(spec);
+      : note
+        ? `${positionInstruction(spec)} — ${note}`
+        : positionInstruction(spec);
   progressFill.style.width = `${Math.round(progress * 100)}%`;
-  progressFill.classList.toggle("ready", phase === "confirm");
+  progressFill.classList.toggle("ready", phase === "confirm" || note !== null);
 }
 
 function readoutRows(
@@ -657,19 +782,44 @@ function readoutRows(
   quality: FrameQuality | null,
   metrics: FaceMetrics | null,
   spec: PositionSpec | null,
+  reading: DetectorReading | null,
 ): ReadoutRow[] {
   const rows: ReadoutRow[] = [
     { term: t("debug.analysis"), value: `${fps.value.toFixed(0)} fps` },
     { term: t("debug.faces"), value: String(faceCount), state: faceCount === 1 ? "ok" : "bad" },
   ];
 
+  // Value and threshold side by side - the panel doubles as the calibration
+  // view, and a value without its limit says nothing there. minDrive and
+  // maxSuppress come through tuningOf, so live changes show immediately.
+  if (spec && reading) {
+    const tun = tuningOf(spec);
+    rows.push({
+      term: t("debug.drive"),
+      value: `${reading.drive.toFixed(2)} (≥ ${tun.minDrive})`,
+      state: reading.drive >= tun.minDrive ? "ok" : "bad",
+    });
+    if (spec.suppress) {
+      rows.push({
+        term: t("debug.suppress"),
+        value: `${reading.suppress.toFixed(2)} (≤ ${tun.maxSuppress})`,
+        state: reading.suppress <= tun.maxSuppress ? "ok" : "bad",
+      });
+    }
+  }
+
   if (pose) {
     const angle = (v: number, tol: number): "ok" | "bad" => (Math.abs(v) <= tol ? "ok" : "bad");
     const fmt = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}°`;
+    // During the sequence the gate measures against the rest pose; the panel
+    // shows that same delta, marked as one.
+    const reference = state === "running" ? (sessionRest?.pose ?? null) : null;
+    const shown = reference ? poseDelta(pose, reference) : pose;
+    const d = reference ? " Δ" : "";
     rows.push(
-      { term: "Yaw", value: fmt(pose.yaw), state: angle(pose.yaw, POSE_TOLERANCE.yaw) },
-      { term: "Pitch", value: fmt(pose.pitch), state: angle(pose.pitch, POSE_TOLERANCE.pitch) },
-      { term: "Roll", value: fmt(pose.roll), state: angle(pose.roll, POSE_TOLERANCE.roll) },
+      { term: `Yaw${d}`, value: `${fmt(shown.yaw)} (±${POSE_TOLERANCE.yaw}°)`, state: angle(shown.yaw, POSE_TOLERANCE.yaw) },
+      { term: `Pitch${d}`, value: `${fmt(shown.pitch)} (±${POSE_TOLERANCE.pitch}°)`, state: angle(shown.pitch, POSE_TOLERANCE.pitch) },
+      { term: `Roll${d}`, value: `${fmt(shown.roll)} (±${POSE_TOLERANCE.roll}°)`, state: angle(shown.roll, POSE_TOLERANCE.roll) },
     );
   }
 
@@ -677,20 +827,22 @@ function readoutRows(
     rows.push(
       {
         term: t("debug.sharpness"),
-        value: quality.sharpness.toFixed(0),
+        value: `${quality.sharpness.toFixed(0)} (≥ ${QUALITY_THRESHOLDS.minSharpness})`,
         state: quality.sharpness >= QUALITY_THRESHOLDS.minSharpness ? "ok" : "bad",
       },
       { term: t("debug.luminance"), value: quality.luminance.toFixed(0) },
       {
         term: t("debug.clipping"),
-        value: `${(quality.clipping * 100).toFixed(1)} %`,
-        state: quality.clipping <= QUALITY_THRESHOLDS.maxClipping ? "ok" : "bad",
+        value: `${(quality.clippingBright * 100).toFixed(1)} % (≤ ${(QUALITY_THRESHOLDS.maxClippingBright * 100).toFixed(0)} %)`,
+        state: quality.clippingBright <= QUALITY_THRESHOLDS.maxClippingBright ? "ok" : "bad",
       },
+      // Recorded, not gated - explains a dark scene without failing it.
+      { term: t("debug.clippingDark"), value: `${(quality.clippingDark * 100).toFixed(1)} %` },
       {
         // Both numbers: the share decides, the pixels say how finely the face
         // is resolved in the saved image.
         term: t("debug.interocular"),
-        value: `${quality.interocularPx.toFixed(0)} px · ${(quality.interocular * 100).toFixed(1)} %`,
+        value: `${quality.interocularPx.toFixed(0)} px · ${(quality.interocular * 100).toFixed(1)} % (≥ ${(QUALITY_THRESHOLDS.minInterocular * 100).toFixed(1)} %)`,
         state: quality.interocular >= QUALITY_THRESHOLDS.minInterocular ? "ok" : "bad",
       },
     );
@@ -795,6 +947,12 @@ function afterTuningChange(): void {
 function renderPositionList(): void {
   const results = session?.allResults ?? null;
   const currentId = session?.currentSpec?.id ?? null;
+  // Free navigation: always on a held sequence (manual/dev mode); in the
+  // automatic sequence once the rest pose is captured - it is the reference
+  // the other positions hang on, so it comes first.
+  const neutralDone = Boolean(results?.find((r) => r.spec.id === "neutral")?.still);
+  const clickable =
+    Boolean(session) && state === "running" && (devMode || !autoAdvance || neutralDone);
 
   posList.replaceChildren(
     ...POSITIONS.map((spec) => {
@@ -807,6 +965,11 @@ function renderPositionList(): void {
       li.classList.toggle("is-current", spec.id === currentId && state === "running");
       li.classList.toggle("is-done", done);
       li.classList.toggle("is-missing", missing && !done);
+      if (clickable) {
+        li.classList.add("is-clickable");
+        li.title = t("poslist.jump");
+        li.addEventListener("click", () => redoPosition(spec.id));
+      }
 
       const num = document.createElement("span");
       num.className = "num";
@@ -911,6 +1074,7 @@ function redoPosition(id: PositionId): void {
   btnShutter.hidden = false;
   btnSkip.hidden = false;
   btnExport.hidden = true;
+  updateFlowButtons();
   chart.clear();
   setStatus(t("status.repeat"));
   void updateWakeLock();
@@ -926,6 +1090,10 @@ async function exportBundle(): Promise<void> {
     setStatus(t("status.finishing"));
     sessionResult ??= await session.finish();
 
+    // Measurement, no cropping: what a face crop would have saved on this
+    // device, per still and in total. Goes into manifest and status line.
+    const crop = await estimateCropSavings(sessionResult.results, STILL_QUALITY);
+
     const manifest = buildManifest({
       session: sessionResult,
       // Not the values noted on open: on iOS width and height are swapped
@@ -934,6 +1102,8 @@ async function exportBundle(): Promise<void> {
       cameraProbe,
       analysis: { edge: ANALYSIS_EDGE },
       videoBitsPerSecond: sessionBitrate,
+      crop,
+      rest: sessionRest,
       cameraLabel: camera?.label ?? "Videodatei",
       isFrontFacing: camera?.isFrontFacing ?? false,
       model: landmarker.modelInfo,
@@ -947,9 +1117,19 @@ async function exportBundle(): Promise<void> {
 
     const mb = (blob.size / 1024 / 1024).toFixed(1);
     const videoMb = (sessionResult.recording.bytes / 1024 / 1024).toFixed(1);
-    setStatus(
-      `Gespeichert: ${mb} MB gesamt, davon ${videoMb} MB Video (${(sessionResult.durationMs / 1000).toFixed(0)} s)`,
-    );
+    let saved = t("status.saved", {
+      total: mb,
+      video: videoMb,
+      seconds: (sessionResult.durationMs / 1000).toFixed(0),
+    });
+    if (crop.totals) {
+      saved += ` · ${t("status.cropSaving", {
+        percent: Math.round((1 - crop.totals.croppedBytes / crop.totals.fullBytes) * 100),
+        full: (crop.totals.fullBytes / 1024 / 1024).toFixed(1),
+        cropped: (crop.totals.croppedBytes / 1024 / 1024).toFixed(1),
+      })}`;
+    }
+    setStatus(saved);
     void updateWakeLock();
   } catch (err) {
     reportError(err);
@@ -963,8 +1143,21 @@ async function exportBundle(): Promise<void> {
 btnStart.addEventListener("click", () => void startCamera());
 btnRun.addEventListener("click", () => startSequence());
 btnShutter.addEventListener("click", () => void session?.captureManually(lastSample));
+btnNext.addEventListener("click", () => session?.next());
 btnSkip.addEventListener("click", () => session?.skip());
 btnExport.addEventListener("click", () => void exportBundle());
+
+toggleAuto.addEventListener("change", () => {
+  autoAdvance = toggleAuto.checked;
+  session?.setAutoAdvance(autoAdvance);
+  updateFlowButtons();
+});
+
+toggleDev.addEventListener("change", () => {
+  devMode = toggleDev.checked;
+  session?.setDevMode(devMode);
+  updateFlowButtons();
+});
 
 cameraSelect.addEventListener("change", () => void startCamera());
 fileInput.addEventListener("change", () => {

@@ -23,8 +23,11 @@ export interface FrameQuality {
   sharpness: number;
   /** Mean brightness, 0..255. */
   luminance: number;
-  /** Share of blown-out or crushed pixels, 0..1. */
-  clipping: number;
+  /** Share of blown-out pixels, 0..1. Gates - backlight and flash show here. */
+  clippingBright: number;
+  /** Share of crushed pixels, 0..1. Recorded only: a dark room behind the
+   *  head is the screen-light scenario, not an exposure error. */
+  clippingDark: number;
   /** Eye distance as a share of frame width. The threshold hangs on this. */
   interocular: number;
   /** Same distance in pixels of the saved still. For the record, not a threshold. */
@@ -32,6 +35,10 @@ export interface FrameQuality {
   /** Face centre in normalised coordinates. */
   centerX: number;
   centerY: number;
+  /** Face box extent in normalised coordinates. Centre plus extent locate the
+   *  face in the saved still, e.g. for the crop measurement. */
+  boxWidth: number;
+  boxHeight: number;
 }
 
 /** Result of one analysed frame. */
