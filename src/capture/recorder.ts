@@ -48,6 +48,9 @@ export class SequenceRecorder {
   private chunks: Blob[] = [];
   private startedAt = 0;
   private mime = "";
+  /** Wann pausiert wurde (0 = laeuft) und wieviel Pause sich summiert hat. */
+  private pausedAt = 0;
+  private pausedTotal = 0;
 
   constructor(
     private readonly stream: MediaStream,
@@ -58,13 +61,48 @@ export class SequenceRecorder {
     return this.recorder?.state === "recording";
   }
 
-  /** Time since recording started - the reference axis for all stills. */
+  /**
+   * Position auf der Videozeitachse - die Bezugsachse fuer alles, was spaeter
+   * im Video gefunden werden soll.
+   *
+   * Pausen zaehlen bewusst nicht mit: `pause()` haelt die Aufzeichnung an, im
+   * Video entsteht kein Loch, sondern ein Schnitt. Wuerde hier die Wanduhr
+   * weiterlaufen, zeigten alle Zeitstempel nach der ersten Pause auf die
+   * falsche Stelle.
+   */
   get elapsedMs(): number {
-    return this.startedAt === 0 ? 0 : performance.now() - this.startedAt;
+    if (this.startedAt === 0) return 0;
+    const now = this.pausedAt > 0 ? this.pausedAt : performance.now();
+    return now - this.startedAt - this.pausedTotal;
+  }
+
+  get isPaused(): boolean {
+    return this.recorder?.state === "paused";
+  }
+
+  /** Haelt die Aufzeichnung an. Die Zeitachse bleibt stehen. */
+  pause(): void {
+    if (this.recorder?.state !== "recording") return;
+    this.recorder.pause();
+    this.pausedAt = performance.now();
+  }
+
+  resume(): void {
+    if (this.recorder?.state !== "paused") return;
+    this.recorder.resume();
+    if (this.pausedAt > 0) this.pausedTotal += performance.now() - this.pausedAt;
+    this.pausedAt = 0;
   }
 
   get mimeType(): string {
     return this.mime;
+  }
+
+  /** Chunks received so far. Still zero a few seconds in means the browser
+   *  is not encoding this stream - better to stop than to hand over an
+   *  empty file at the end. */
+  get chunkCount(): number {
+    return this.chunks.length;
   }
 
   start(): void {
@@ -94,6 +132,8 @@ export class SequenceRecorder {
         this.recorder = recorder;
         this.mime = mimeType;
         this.startedAt = performance.now();
+        this.pausedAt = 0;
+        this.pausedTotal = 0;
         return;
       } catch (err) {
         lastError = err;
@@ -109,6 +149,8 @@ export class SequenceRecorder {
     const recorder = this.recorder;
     if (!recorder) throw new Error(t("error.recorderIdle"));
 
+    // Vor dem Messen fortsetzen: sonst bliebe die Achse in der Pause stehen.
+    this.resume();
     const durationMs = this.elapsedMs;
     await new Promise<void>((resolve) => {
       recorder.addEventListener("stop", () => resolve(), { once: true });

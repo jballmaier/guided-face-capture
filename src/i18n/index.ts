@@ -98,7 +98,11 @@ export function onLocaleChange(listener: () => void): () => void {
  * `data-i18n` sets text content, `data-i18n-title` the tooltip. The attributes
  * stay in the HTML so the same place can be refilled on a language change.
  */
-export function applyTranslations(root: ParentNode = document): void {
+export function applyTranslations(
+  root: ParentNode = document,
+  /** Page title. Each page names its own; the default keeps callers unchanged. */
+  titleKey: TranslationKey = "app.title",
+): void {
   for (const node of root.querySelectorAll<HTMLElement>("[data-i18n]")) {
     const key = node.dataset["i18n"];
     if (key) node.textContent = t(key as TranslationKey);
@@ -107,7 +111,7 @@ export function applyTranslations(root: ParentNode = document): void {
     const key = node.dataset["i18nTitle"];
     if (key) node.title = t(key as TranslationKey);
   }
-  document.title = `${t("app.title")} - ${t("app.tag")}`;
+  document.title = `${t(titleKey)} - ${t("app.tag")}`;
 }
 
 export function initLocale(): void {

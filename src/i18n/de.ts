@@ -217,4 +217,76 @@ export const de: Dictionary = {
   "bundle.prototype": "Prototyp - nicht fuer die Verwendung mit Patientendaten.",
   "bundle.mirrorNote":
     "Die Standbilder sind NICHT gespiegelt: Links und rechts sind die Seite der aufgenommenen Person.",
+
+  // ------------------------------------------- Geführtes Video (Basis-Seite)
+  "app.basicTitle": "Geführtes Video",
+  "app.basicNote":
+    "Einmal ausrichten, dann führt der Ton – der Rahmen wird dabei überwacht. Alles bleibt auf diesem Gerät.",
+  "nav.full": "Live-Analyse",
+  "nav.basic": "Geführtes Video",
+
+  "btn.checkFraming": "Ausschnitt prüfen",
+  "btn.backToAlign": "Zurück zur Ausrichtung",
+  "btn.abort": "Abbrechen",
+  "btn.again": "Neue Aufnahme",
+
+  "basic.statusReady": "Bereit. Kamera starten.",
+  "basic.aligning": "Ruhig halten und in die Kamera schauen.",
+  "basic.aligned": "Ausrichtung in Ordnung – Ausschnitt prüfen.",
+  "basic.framing": "Ausschnitt {w}×{h} aus {sw}×{sh} mit {fps}/s. Bitte in diesem Rahmen bleiben.",
+  "basic.recording": "Aufnahme läuft – dem Ton folgen.",
+  "basic.stopped": "Aufnahme abgebrochen – das Aufgezeichnete lässt sich trotzdem sichern.",
+  "basic.framingTitle": "Das wird aufgezeichnet",
+  "basic.framingHint":
+    "Bitte während der ganzen Aufnahme in diesem Rahmen bleiben – es wird nichts nachgeführt.",
+  "basic.soundHint": "Der Ton führt Sie: Lautstärke prüfen, am iPhone auch den Stummschalter.",
+  "basic.announceSuffix": "Dreimal, je eine Sekunde.",
+  "basic.announceHold": "Ruhig halten.",
+  "basic.holdNow": "Halten",
+  "basic.releaseNow": "Entspannen",
+  "basic.repOf": "{rep} von {count}",
+  "basic.noVoice": "Keine geräteeigene Stimme verfügbar – Führung über Töne und Text.",
+  "basic.outOfFrame": "Bitte zurück in den Rahmen",
+  "basic.noFaceWatch": "Gesicht nicht sichtbar – bitte zurück in den Rahmen",
+  "basic.watchSummary": "{seconds} s außerhalb des Rahmens ({percent} % der Aufnahme)",
+  "basic.watchClean": "Gesicht durchgehend im Rahmen",
+  "basic.loopFps": "Bild {video} fps, Erkennung {detect} fps",
+  "basic.voiceReady": "Stimme: {name}.",
+  "btn.guide": "Anleitung starten",
+  "btn.repeat": "Wiederholen: {name}",
+  "btn.repeatPlain": "Position wiederholen",
+  "basic.armed": "zum Aufnehmen drücken",
+  "basic.discarded": "Das Gesicht war außerhalb des Rahmens – die Position wird wiederholt.",
+  "basic.discardedCount": "{count} verworfen",
+  "basic.savedSession": "{clips} Clips, {total} MB, {seconds} s Aufnahme ({fps} fps)",
+  "basic.savedZip": "Gespeichert: {clips} Clips, {total} MB",
+  "basic.autoDiscard": "Bei Rahmenverlust verwerfen",
+  "basic.autoDiscard.title":
+    "Bricht den Clip ab und verwirft ihn, solange das Gesicht außerhalb des Rahmens ist, und wiederholt die Position von vorn. Aus: Der Clip läuft durch, und nur die Proben im Manifest sagen, was passiert ist.",
+  "basic.recFps": "Aufnahme {fps} fps",
+  "basic.noData": "Der Browser lieferte keine Videodaten – Aufnahme abgebrochen.",
+  "basic.size": "Videogröße",
+  "basic.sizeSource": "Quelle",
+  "basic.rate": "Bitrate",
+  "basic.rateFormula": "Formel",
+  "basic.fullFrame": "Vollbild",
+  "basic.fullFrame.title":
+    "Zeichnet das ungeschnittene Kamerabild auf. Rückfallweg, falls die zugeschnittene Aufnahme auf diesem Gerät nicht trägt – das Ausschnittrechteck steht weiterhin im Manifest.",
+
+  // ------------------------------------ Geführtes Video: ZIP-Beschreibung
+  "videoBundle.title": "Geführte Videoaufnahme",
+  "videoBundle.intro":
+    "Ein Video mit zwölf Ausdrücken, akustisch angeleitet. Während der Aufnahme lief keine Analyse – die Einzelbilder werden nachträglich herausgeschnitten.",
+  "videoBundle.contents": "Inhalt",
+  "videoBundle.clips": "je Position eine Videodatei, benannt 01_… bis 12_…, bereits auf das Gesicht zugeschnitten",
+  "videoBundle.rest": "rest_full.jpg – das ruhende Gesicht in voller Kameraauflösung",
+  "videoBundle.manifest":
+    "manifest.json – Ausschnittrechteck, Kamera, Ruhe-Baseline und je Clip die Zeitfenster der Halten",
+  "videoBundle.howto": "Positionen herausschneiden",
+  "videoBundle.howto1":
+    "Jeder Clip enthält genau eine Position. Die Halten stehen mit Anfang und Ende in Millisekunden ab Beginn dieses Clips.",
+  "videoBundle.howto2":
+    "Über jedes Fenster einen Landmarker laufen lassen und das Bild mit der stärksten Auslenkung behalten.",
+  "videoBundle.howto3":
+    "Ohne Landmarker: Anfang + 0,6 × Dauer liegt nahe am Höhepunkt, vor dem Zurückgehen.",
 };

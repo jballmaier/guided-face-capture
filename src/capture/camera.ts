@@ -24,6 +24,20 @@ export interface OpenCameraOptions {
   /** Upper bound for the long edge. 0 removes the limit. */
   maxEdge?: number;
   idealFrameRate?: number;
+  /**
+   * Mindestbildrate als *harte* Bedingung.
+   *
+   * A camera offers a fixed list of modes, and its largest ones are meant for
+   * photographs: 4000x3000 runs at half the rate of the video modes. Asked as
+   * `ideal`, the frame rate loses against the resolution and the browser picks
+   * that photo mode - which is how a session ends up recorded at 15 fps with
+   * the track still reporting 30 (measured 2026-08-29).
+   *
+   * As `min` it is a filter instead of a wish: the browser only considers modes
+   * that can sustain it, and picks the largest of those. Set this whenever the
+   * recording is video; leave it out when a single sharp frame is the point.
+   */
+  minFrameRate?: number;
 }
 
 export interface ActiveCamera {
@@ -34,6 +48,9 @@ export interface ActiveCamera {
   /** Front-facing? Controls the preview mirroring only. */
   isFrontFacing: boolean;
   label: string;
+  /** Durchgesetzte Mindestbildrate, `null` wenn keine verlangt oder keine
+   *  Betriebsart sie hergab. */
+  frameRateFloor: number | null;
 }
 
 /** Device list. Labels are empty before the first grant - call after `openCamera`. */
@@ -51,7 +68,7 @@ export async function listCameras(): Promise<CameraDevice[]> {
  * 4:3 sensor top and bottom - on a face, in the direction it is long.
  */
 export async function openCamera(options: OpenCameraOptions = {}): Promise<ActiveCamera> {
-  const { deviceId, maxEdge = MAX_CAPTURE_EDGE, idealFrameRate = 30 } = options;
+  const { deviceId, maxEdge = MAX_CAPTURE_EDGE, idealFrameRate = 30, minFrameRate } = options;
 
   // Never set deviceId and facingMode together: some browsers read the
   // combination as contradictory and open the wrong camera.
@@ -64,18 +81,34 @@ export async function openCamera(options: OpenCameraOptions = {}): Promise<Activ
   const edge = maxEdge > 0 ? maxEdge : MAX_CAPTURE_EDGE;
   video.width = { ideal: edge };
   video.height = { ideal: edge };
-  video.frameRate = { ideal: idealFrameRate };
+  video.frameRate =
+    minFrameRate === undefined
+      ? { ideal: idealFrameRate }
+      : { min: minFrameRate, ideal: idealFrameRate };
   // Prefer a native mode over a browser-side downscale.
   (video as MediaTrackConstraints & { resizeMode?: ConstrainDOMString }).resizeMode = { ideal: "none" };
 
-  const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+  let floor = minFrameRate ?? null;
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+  } catch (err) {
+    // Kein Modus schafft die Mindestrate. Dann lieber ein langsames Bild als
+    // gar keines - aber es muss dastehen, dass es langsam sein wird.
+    if (floor === null || !isOverconstrained(err)) throw err;
+    console.warn(`Keine Kamerabetriebsart mit ${floor} Bildern je Sekunde`, err);
+    video.frameRate = { ideal: idealFrameRate };
+    floor = null;
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+  }
+
   const track = stream.getVideoTracks()[0];
   if (!track) {
     stream.getTracks().forEach((t) => t.stop());
     throw new Error(t("error.noVideoTrack"));
   }
 
-  await raiseToMax(track, edge);
+  await raiseToMax(track, edge, floor);
 
   const settings = track.getSettings();
   const label = track.label || "Kamera";
@@ -85,7 +118,13 @@ export async function openCamera(options: OpenCameraOptions = {}): Promise<Activ
     settings,
     isFrontFacing: detectFrontFacing(settings, label),
     label,
+    frameRateFloor: floor,
   };
+}
+
+/** Hat der Browser die Bedingungen abgelehnt - oder ging etwas anderes schief? */
+function isOverconstrained(err: unknown): boolean {
+  return err instanceof Error && err.name === "OverconstrainedError";
 }
 
 /**
@@ -95,7 +134,11 @@ export async function openCamera(options: OpenCameraOptions = {}): Promise<Activ
  * again - `getCapabilities` is available only once the track exists. On
  * failure the negotiated mode stands.
  */
-async function raiseToMax(track: MediaStreamTrack, edge: number): Promise<void> {
+async function raiseToMax(
+  track: MediaStreamTrack,
+  edge: number,
+  floor: number | null,
+): Promise<void> {
   if (typeof track.getCapabilities !== "function") return;
 
   const caps = track.getCapabilities();
@@ -112,12 +155,14 @@ async function raiseToMax(track: MediaStreamTrack, edge: number): Promise<void> 
   if ((now.width ?? 0) * (now.height ?? 0) >= targetW * targetH) return;
 
   try {
-    // No frame rate: many cameras drop below 30 fps at full resolution, and
-    // resolution wins here.
+    // Die Mindestrate muss mit: `applyConstraints` ersetzt den ganzen Satz,
+    // und ohne sie holte dieser zweite Anlauf genau die Fotobetriebsart
+    // zurueck, die der erste ausgeschlossen hatte.
     await track.applyConstraints({
       width: { ideal: targetW },
       height: { ideal: targetH },
       resizeMode: { ideal: "none" },
+      ...(floor === null ? {} : { frameRate: { min: floor } }),
     } as MediaTrackConstraints);
   } catch (err) {
     console.warn("Hoehere Aufloesung nicht durchsetzbar", err);

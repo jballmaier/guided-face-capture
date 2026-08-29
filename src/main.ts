@@ -13,8 +13,8 @@ import {
   firstFaceMatrix,
   toBlendshapeMap,
 } from "./vision/landmarker";
-import { poseDelta, poseFromMatrix, poseWithinTolerance, POSE_TOLERANCE } from "./vision/pose";
-import { measureQuality, qualityIssues, issueText, QUALITY_THRESHOLDS } from "./vision/quality";
+import { poseDelta, poseFromMatrix, POSE_TOLERANCE } from "./vision/pose";
+import { measureQuality, QUALITY_THRESHOLDS } from "./vision/quality";
 import { faceMetrics, type FaceMetrics } from "./vision/geometry";
 import {
   POSITIONS,
@@ -51,6 +51,10 @@ import {
   type TuningKey,
 } from "./protocol/tuning";
 import { buildBundle, downloadBlob } from "./export/bundle";
+import { AlignGate, collectIssues, RestBaseline, type RestSnapshot } from "./align/align";
+import { bitrateFor } from "./capture/bitrate";
+import { setWakeLock, watchVisibility } from "./ui/wakeLock";
+import { initTheme } from "./ui/theme";
 import { estimateCropSavings } from "./export/crop";
 import { drawOverlay, highlightFor, type MeshMode } from "./ui/overlay";
 import { StripChart } from "./ui/graph";
@@ -58,9 +62,6 @@ import { renderBars, renderReadout, renderSideCompare, type ReadoutRow, type Sid
 import type { Blendshapes, FrameQuality, HeadPose } from "./types";
 
 type AppState = "idle" | "aligning" | "running" | "review";
-
-/** How long alignment must hold before recording is released. */
-const ALIGN_HOLD_MS = 1200;
 
 /**
  * Analysis and capture are separate.
@@ -76,21 +77,9 @@ const ALIGN_HOLD_MS = 1200;
 const ANALYSIS_EDGE = 640;
 const OVERLAY_EDGE = 1280;
 
-/** Bits per pixel and second. A fixed bitrate would be the real quality loss
- *  at full resolution: a large frame the codec has nothing to fill it with. */
-const BITS_PER_PIXEL = 0.07;
-const MAX_BITRATE = 40_000_000;
-const MIN_BITRATE = 2_000_000;
-
 /** JPEG quality of the stills - the crop measurement re-encodes at the same
  *  value, or the comparison would measure the quality setting instead. */
 const STILL_QUALITY = 0.92;
-
-function bitrateFor(width: number, height: number, frameRate: number): number {
-  const fps = frameRate > 0 ? frameRate : 30;
-  const raw = Math.round(width * height * fps * BITS_PER_PIXEL);
-  return Math.min(MAX_BITRATE, Math.max(MIN_BITRATE, raw));
-}
 
 /** Groesse einer verkleinerten Kopie mit derselben Form. */
 function scaledTo(width: number, height: number, edge: number): { width: number; height: number } {
@@ -182,7 +171,6 @@ let sessionResult: SessionResult | null = null;
 let state: AppState = "idle";
 let stopLoop: (() => void) | null = null;
 let lastTimestamp = -1;
-let alignOkSince: number | null = null;
 let lastSample: DetectorSample | null = null;
 let cameraProbe: CameraProbe | null = null;
 let sessionBitrate = 0;
@@ -223,31 +211,10 @@ const fps = { last: 0, value: 0 };
  * (measured 2026-08-28). Alignment itself keeps gating absolutely, which
  * bounds how far the frozen rest can sit off the camera.
  */
-let restPoseAcc: HeadPose | null = null;
-let restMetricsAcc: FaceMetrics | null = null;
-let sessionRest: { pose: HeadPose; metrics: FaceMetrics } | null = null;
-
-const REST_EMA = 0.1;
-const mix = (a: number, b: number): number => a + (b - a) * REST_EMA;
-
-function accumulateRest(pose: HeadPose, metrics: FaceMetrics): void {
-  restPoseAcc = restPoseAcc
-    ? {
-        yaw: mix(restPoseAcc.yaw, pose.yaw),
-        pitch: mix(restPoseAcc.pitch, pose.pitch),
-        roll: mix(restPoseAcc.roll, pose.roll),
-      }
-    : { ...pose };
-  if (restMetricsAcc) {
-    const mixed = { ...restMetricsAcc };
-    for (const key of Object.keys(mixed) as (keyof FaceMetrics)[]) {
-      mixed[key] = mix(restMetricsAcc[key], metrics[key]);
-    }
-    restMetricsAcc = mixed;
-  } else {
-    restMetricsAcc = { ...metrics };
-  }
-}
+const restBaseline = new RestBaseline();
+const alignGate = new AlignGate();
+/** The frozen snapshot - not the same thing as the running average. */
+let sessionRest: RestSnapshot | null = null;
 
 function setStatus(text: string, bad = false): void {
   status.textContent = text;
@@ -262,34 +229,11 @@ function setStatus(text: string, bad = false): void {
  * Without it the screen light is gone after the usual timeout - exactly when
  * the person holds still and touches nothing.
  */
-interface WakeLockLike {
-  release(): Promise<void>;
-  addEventListener(type: "release", listener: () => void): void;
-}
+/** Held while recording, and while the screen is used as a light. */
+const wakeWanted = (): boolean => view.light || state === "running";
 
-let wakeLock: WakeLockLike | null = null;
-
-async function updateWakeLock(): Promise<void> {
-  const wanted = view.light || state === "running";
-  const api = (
-    navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<WakeLockLike> } }
-  ).wakeLock;
-  if (!api) return;
-
-  if (wanted && !wakeLock) {
-    try {
-      wakeLock = await api.request("screen");
-      wakeLock.addEventListener("release", () => {
-        wakeLock = null;
-      });
-    } catch {
-      // No reason to fail the recording over this.
-    }
-  } else if (!wanted && wakeLock) {
-    const held = wakeLock;
-    wakeLock = null;
-    void held.release().catch(() => undefined);
-  }
+function updateWakeLock(): void {
+  void setWakeLock(wakeWanted());
 }
 
 // ---------------------------------------------------------------- Quellen
@@ -498,9 +442,8 @@ function enterAligning(): void {
   session = null;
   sessionResult = null;
   finishing = false;
-  alignOkSince = null;
-  restPoseAcc = null;
-  restMetricsAcc = null;
+  alignGate.reset();
+  restBaseline.reset();
   sessionRest = null;
   stageEmpty.hidden = true;
   review.hidden = true;
@@ -536,8 +479,7 @@ function startSequence(): void {
       live.frameRate ?? 30,
     );
 
-    sessionRest =
-      restPoseAcc && restMetricsAcc ? { pose: restPoseAcc, metrics: restMetricsAcc } : null;
+    sessionRest = restBaseline.snapshot;
 
     session = new CaptureSession(video, stream, {
       // Bitrate and still quality drive the storage footprint directly.
@@ -651,10 +593,11 @@ function onFrame(nowMs: number): void {
       metrics &&
       collectIssues(faceCount, pose, quality, null).length === 0
     ) {
-      accumulateRest(pose, metrics);
-      if (restPoseAcc && restMetricsAcc) {
-        sessionRest = { pose: restPoseAcc, metrics: restMetricsAcc };
-        session.setRest(restPoseAcc, restMetricsAcc);
+      restBaseline.add(pose, metrics);
+      const refined = restBaseline.snapshot;
+      if (refined) {
+        sessionRest = refined;
+        session.setRest(refined.pose, refined.metrics);
       }
     }
 
@@ -704,38 +647,15 @@ function onFrame(nowMs: number): void {
   if (dt > 0) fps.value = fps.value * 0.9 + (1000 / dt) * 0.1;
 }
 
-function collectIssues(
-  faceCount: number,
-  pose: HeadPose | null,
-  quality: FrameQuality | null,
-  /** Rest pose to measure against; null gates absolutely (alignment phase). */
-  reference: HeadPose | null,
-): string[] {
-  if (faceCount === 0) return [issueText("no-face")];
-  if (faceCount > 1) return [issueText("multiple-faces")];
-  const out = quality ? qualityIssues(quality).map(issueText) : [];
-  if (pose) {
-    const gauged = reference ? poseDelta(pose, reference) : pose;
-    if (!poseWithinTolerance(gauged, POSE_TOLERANCE)) out.push(issueText("head-tilted"));
-  }
-  return out;
-}
-
 function handleAligning(
   issues: string[],
   nowMs: number,
   pose: HeadPose | null,
   metrics: FaceMetrics | null,
 ): void {
-  if (issues.length > 0) {
-    alignOkSince = null;
-    btnRun.disabled = true;
-    return;
-  }
   // Only clean frames feed the rest baseline.
-  if (pose && metrics) accumulateRest(pose, metrics);
-  alignOkSince ??= nowMs;
-  btnRun.disabled = nowMs - alignOkSince < ALIGN_HOLD_MS;
+  if (issues.length === 0 && pose && metrics) restBaseline.add(pose, metrics);
+  btnRun.disabled = !alignGate.update(issues.length, nowMs);
 }
 
 // ----------------------------------------------------------------- Rendering
@@ -1181,16 +1101,19 @@ toggleAnon.addEventListener("change", () => {
   if (state === "review") renderReview();
 });
 
-toggleLight.addEventListener("change", () => {
-  view.light = toggleLight.checked;
-  document.body.classList.toggle("lightmode", view.light);
-  void updateWakeLock();
+/**
+ * Hell/dunkel folgt dem System, bis jemand den Schalter benutzt.
+ *
+ * Die helle Ansicht ist hier mehr als Geschmack: Sie leuchtet das Gesicht aus
+ * und haelt den Bildschirm wach. Deshalb laeuft der Wechsel ueber dieselbe
+ * Stelle wie die Bildschirmsperre.
+ */
+initTheme(toggleLight, (light) => {
+  view.light = light;
+  updateWakeLock();
 });
 
-// The wake lock is dropped when the tab goes to the background - reacquire.
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void updateWakeLock();
-});
+watchVisibility(wakeWanted);
 
 for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
   tab.addEventListener("click", () => {

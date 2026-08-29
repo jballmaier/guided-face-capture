@@ -49,6 +49,14 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: "es2022",
+    rollupOptions: {
+      // Beide Seiten muessen hier stehen: sobald `input` gesetzt ist, findet
+      // Vite index.html nicht mehr von allein.
+      input: {
+        main: resolve(__dirname, "index.html"),
+        basic: resolve(__dirname, "basic.html"),
+      },
+    },
   },
   optimizeDeps: {
     // tasks-vision is pre-bundled on purpose. Excluded, Vite serves the file

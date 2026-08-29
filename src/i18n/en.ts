@@ -219,6 +219,78 @@ export const en = {
   "bundle.prototype": "Prototype - not for use with patient data.",
   "bundle.mirrorNote":
     "The stills are NOT mirrored: left and right are the side of the person recorded.",
+
+  // ------------------------------------------------- Guided video (basic page)
+  "app.basicTitle": "Guided video",
+  "app.basicNote":
+    "Aligned once, then guided by sound while the frame is watched. Everything stays on this device.",
+  "nav.full": "Live analysis",
+  "nav.basic": "Guided video",
+
+  "btn.checkFraming": "Check framing",
+  "btn.backToAlign": "Back to alignment",
+  "btn.abort": "Stop",
+  "btn.again": "New recording",
+
+  "basic.statusReady": "Ready. Start the camera.",
+  "basic.aligning": "Hold still and look into the camera.",
+  "basic.aligned": "Alignment is good - check the framing.",
+  "basic.framing": "Crop {w}x{h} out of {sw}x{sh} at {fps}/s. Stay inside this frame.",
+  "basic.recording": "Recording - follow the sound.",
+  "basic.stopped": "Recording stopped - what was recorded can still be saved.",
+  "basic.framingTitle": "This is what gets recorded",
+  "basic.framingHint":
+    "Stay inside this frame for the whole recording - nothing follows you.",
+  "basic.soundHint": "Sound guides you: check the volume, on iPhone also the silent switch.",
+  "basic.announceSuffix": "Three times, one second each.",
+  "basic.announceHold": "Hold still.",
+  "basic.holdNow": "Hold",
+  "basic.releaseNow": "Relax",
+  "basic.repOf": "{rep} of {count}",
+  "basic.noVoice": "No on-device voice available - guiding by tones and text.",
+  "basic.outOfFrame": "Please move back into the frame",
+  "basic.noFaceWatch": "Face not visible - please move back into the frame",
+  "basic.watchSummary": "{seconds} s outside the frame ({percent} % of the recording)",
+  "basic.watchClean": "face inside the frame throughout",
+  "basic.loopFps": "video {video} fps, detection {detect} fps",
+  "basic.voiceReady": "Voice: {name}.",
+  "btn.guide": "Start guidance",
+  "btn.repeat": "Repeat: {name}",
+  "btn.repeatPlain": "Repeat position",
+  "basic.armed": "press to record",
+  "basic.discarded": "Face was outside the frame - this position is repeated.",
+  "basic.discardedCount": "{count} discarded",
+  "basic.savedSession": "{clips} clips, {total} MB, {seconds} s recorded ({fps} fps)",
+  "basic.savedZip": "Saved: {clips} clips, {total} MB",
+  "basic.autoDiscard": "Discard on frame loss",
+  "basic.autoDiscard.title":
+    "Stops and discards the clip while the face is outside the frame, and repeats that position from the start. Off, the clip runs on and only the samples in the manifest say what happened.",
+  "basic.recFps": "recording {fps} fps",
+  "basic.noData": "The browser delivered no video data - recording stopped.",
+  "basic.size": "Video size",
+  "basic.sizeSource": "Source",
+  "basic.rate": "Bitrate",
+  "basic.rateFormula": "standard",
+  "basic.fullFrame": "Full frame",
+  "basic.fullFrame.title":
+    "Records the uncropped camera image. Fallback if cropped recording fails on this device - the crop rectangle is still written to the manifest.",
+
+  // ----------------------------------------------- Guided video ZIP read-me
+  "videoBundle.title": "Guided video capture",
+  "videoBundle.intro":
+    "One video of twelve expressions, cued acoustically. No analysis ran while recording - the single frames are extracted afterwards.",
+  "videoBundle.contents": "Contents",
+  "videoBundle.clips": "one video file per position, named 01_... to 12_..., already cropped to the face",
+  "videoBundle.rest": "rest_full.jpg - the resting face at full camera resolution",
+  "videoBundle.manifest":
+    "manifest.json - crop rectangle, camera, rest baseline and, per clip, when each hold was asked for",
+  "videoBundle.howto": "Extracting the positions",
+  "videoBundle.howto1":
+    "Each clip holds one position. Its holds are listed with start and end in milliseconds from the start of that clip.",
+  "videoBundle.howto2":
+    "Run a landmarker over each window and keep the frame with the strongest movement.",
+  "videoBundle.howto3":
+    "Without a landmarker: start + 0.6 x duration lands close to the peak, before the movement is released.",
 } as const;
 
 export type TranslationKey = keyof typeof en;
