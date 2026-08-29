@@ -16,27 +16,42 @@ export interface BundleInput {
   manifest: Record<string, unknown>;
 }
 
-export async function buildBundle({ session, manifest }: BundleInput): Promise<Blob> {
-  const files: Record<string, [Uint8Array, { level: 0 }]> = {};
+/**
+ * Packs a set of files into a ZIP. Text is encoded as UTF-8.
+ *
+ * Stored, not deflated (see the header): the caller decides what goes in, so
+ * both pages share one packer instead of two.
+ */
+export async function packZip(files: Record<string, Uint8Array | string>): Promise<Blob> {
   const store = { level: 0 } as const;
-
-  const videoName = `video.${fileExtensionFor(session.recording.mimeType)}`;
-  files[videoName] = [new Uint8Array(await session.recording.blob.arrayBuffer()), store];
-
-  for (const result of session.results) {
-    if (!result.still) continue;
-    const name = `${positionSlug(result.spec)}.jpg`;
-    files[name] = [new Uint8Array(await result.still.blob.arrayBuffer()), store];
+  const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
+  for (const [name, data] of Object.entries(files)) {
+    entries[name] = [typeof data === "string" ? strToU8(data) : data, store];
   }
 
-  files["manifest.json"] = [strToU8(JSON.stringify(manifest, null, 2)), store];
-  files["README.txt"] = [strToU8(readme(session)), store];
-
   const packed = await new Promise<Uint8Array>((resolve, reject) => {
-    zip(files, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)));
+    zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)));
   });
 
   return new Blob([packed as BlobPart], { type: "application/zip" });
+}
+
+export async function buildBundle({ session, manifest }: BundleInput): Promise<Blob> {
+  const files: Record<string, Uint8Array | string> = {};
+
+  files[`video.${fileExtensionFor(session.recording.mimeType)}`] = new Uint8Array(
+    await session.recording.blob.arrayBuffer(),
+  );
+
+  for (const result of session.results) {
+    if (!result.still) continue;
+    files[`${positionSlug(result.spec)}.jpg`] = new Uint8Array(await result.still.blob.arrayBuffer());
+  }
+
+  files["manifest.json"] = JSON.stringify(manifest, null, 2);
+  files["README.txt"] = readme(session);
+
+  return packZip(files);
 }
 
 function readme(session: SessionResult): string {

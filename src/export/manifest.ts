@@ -211,12 +211,12 @@ export function buildManifest(input: ManifestInput): Record<string, unknown> {
   };
 }
 
-function round(value: number, digits: number): number {
+export function round(value: number, digits: number): number {
   const f = 10 ** digits;
   return Math.round(value * f) / f;
 }
 
-function roundMetrics(m: FaceMetrics): Record<string, number> {
+export function roundMetrics(m: FaceMetrics): Record<string, number> {
   return {
     eyeOpeningRight: round(m.eyeOpeningRight, 4),
     eyeOpeningLeft: round(m.eyeOpeningLeft, 4),

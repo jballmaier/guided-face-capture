@@ -435,6 +435,51 @@ main {
   color: var(--bad);
 }
 
+/* Buehne ohne Seitenspalte (Basis-Seite). Die Grid-Regel oben haengt am
+   Elementtyp `main`, den es dort bewusst nicht gibt. */
+.stage.solo {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Ab der Rahmenkontrolle ist die Crop-Canvas die Vorschau: die Person sieht
+   genau den Ausschnitt, der aufgezeichnet wird. Ueber opacity, nicht ueber
+   display - ein ausgeblendetes Video liefert drawImage nicht zuverlaessig
+   weiter Bilddaten. */
+#crop {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.stage:not(.cropped) #crop {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stage.cropped video {
+  opacity: 0;
+}
+
+.navlink {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.navlink:hover {
+  text-decoration: underline;
+}
+
+.repcount {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
 .panel {
   background: var(--panel);
   border-left: 1px solid var(--line);
@@ -817,6 +862,10 @@ select {
     0 0 8px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   user-select: none;
+}
+
+.sidemark[hidden] {
+  display: none;
 }
 
 .sidemark.left {
