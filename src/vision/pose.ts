@@ -37,6 +37,22 @@ export const POSE_TOLERANCE = {
   roll: 5,
 } as const;
 
+/**
+ * Deviation from a reference pose, component-wise.
+ *
+ * Gating absolutely against the camera axis failed in practice: a camera
+ * mounted off eye level puts the resting head near the limit, and expressions
+ * tilt the head along - well-performed movements timed out (measured
+ * 2026-08-28). Measured against the rest pose, the same tolerances hold.
+ */
+export function poseDelta(pose: HeadPose, reference: HeadPose): HeadPose {
+  return {
+    yaw: pose.yaw - reference.yaw,
+    pitch: pose.pitch - reference.pitch,
+    roll: pose.roll - reference.roll,
+  };
+}
+
 export function poseWithinTolerance(
   pose: HeadPose,
   tol: { yaw: number; pitch: number; roll: number } = POSE_TOLERANCE,

@@ -82,24 +82,29 @@ export function measureQuality(
 
   const gray = new Float32Array(PATCH * PATCH);
   let lumSum = 0;
-  let clipped = 0;
+  let clippedBright = 0;
+  let clippedDark = 0;
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     // Rec. 601 luma.
     const g = 0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
     gray[p] = g;
     lumSum += g;
-    if (g >= 250 || g <= 5) clipped++;
+    if (g >= 250) clippedBright++;
+    else if (g <= 5) clippedDark++;
   }
 
   const n = PATCH * PATCH;
   return {
     sharpness: laplacianVariance(gray, PATCH, PATCH),
     luminance: lumSum / n,
-    clipping: clipped / n,
+    clippingBright: clippedBright / n,
+    clippingDark: clippedDark / n,
     interocular: io,
     interocularPx: io * referenceWidth,
     centerX: box.x + box.width / 2,
     centerY: box.y + box.height / 2,
+    boxWidth: box.width,
+    boxHeight: box.height,
   };
 }
 
@@ -110,8 +115,13 @@ export const QUALITY_THRESHOLDS = {
   /** Too dark or too bright to be usable. */
   minLuminance: 60,
   maxLuminance: 205,
-  /** Share of blown-out or crushed pixels in the face. */
-  maxClipping: 0.06,
+  /**
+   * Share of blown-out pixels in the face box. Crushed black pixels do not
+   * count: headphones, hair and a dark room reach the box, and the dark room
+   * is the screen-light scenario - gating on it blocked the intended setup.
+   * A face that is itself too dark is caught by `minLuminance`.
+   */
+  maxClippingBright: 0.06,
   /**
    * Eye distance as a share of frame width - below this the head is too far.
    *
@@ -153,7 +163,7 @@ export function qualityIssues(
   }
   if (q.luminance < t.minLuminance) issues.push("too-dark");
   else if (q.luminance > t.maxLuminance) issues.push("too-bright");
-  if (q.clipping > t.maxClipping) issues.push("overexposed");
+  if (q.clippingBright > t.maxClippingBright) issues.push("overexposed");
   if (q.sharpness < t.minSharpness) issues.push("blurry");
   return issues;
 }

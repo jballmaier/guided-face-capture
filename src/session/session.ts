@@ -1,6 +1,6 @@
 import { captureStill, type Still, type StillOptions } from "../capture/stills";
 import { SequenceRecorder, type Recording } from "../capture/recorder";
-import { PositionDetector, type DetectorReading, type DetectorSample, type DriveSample } from "../protocol/detector";
+import { PositionDetector, type DetectorOptions, type DetectorReading, type DetectorSample, type DriveSample } from "../protocol/detector";
 import { POSITIONS, type PositionId, type PositionSpec } from "../protocol/positions";
 import { tunedSpec, tuningOf, type PositionTuning } from "../protocol/tuning";
 import type { Blendshapes, FrameQuality, HeadPose } from "../types";
@@ -69,6 +69,10 @@ export interface SessionView {
 export interface SessionOptions {
   still?: StillOptions;
   videoBitsPerSecond?: number;
+  /** Rest baseline frozen during alignment; reference for the pose gate and
+   *  the relative geometry signals. Null falls back to absolute gating. */
+  restPose?: HeadPose | null;
+  restMetrics?: FaceMetrics | null;
 }
 
 export interface SessionResult {
@@ -76,6 +80,13 @@ export interface SessionResult {
   results: PositionResult[];
   startedAt: string;
   durationMs: number;
+  /**
+   * True once auto-advance was off at any point while capturing. Like changed
+   * thresholds this marks a calibration run, not a protocol-conforming one.
+   */
+  manualAdvanceUsed: boolean;
+  /** True once dev mode (trigger display-only) was on while capturing. */
+  devModeUsed: boolean;
 }
 
 export class CaptureSession {
@@ -88,6 +99,20 @@ export class CaptureSession {
   private phaseUntil = 0;
   private detector: PositionDetector | null = null;
   private startedAtIso = "";
+  /**
+   * Test control. Off, the sequence holds each position past trigger and
+   * timeout until `next()` - thresholds can then be adjusted against the live
+   * signal without the position running away.
+   */
+  private autoAdvance = true;
+  private manualAdvanceUsed = false;
+  /**
+   * Dev mode: like auto-advance off, but the trigger is display-only - it
+   * neither latches nor marks the position, so it can be watched firing
+   * repeatedly while thresholds are adjusted.
+   */
+  private devMode = false;
+  private devModeUsed = false;
 
   /** Stops a late, worse still from overwriting a better one - toBlob is async. */
   private captureToken = 0;
@@ -100,7 +125,8 @@ export class CaptureSession {
    * best arrives constantly during a movement. Without the guard the frame
    * rate collapses, and with it the detection.
    *
-   * Price: an apex falling into a running encode is skipped.
+   * The detector holds its best back while this is true - an apex falling
+   * into a running encode is retried on the next strong frame, not consumed.
    */
   private capturing = false;
 
@@ -129,7 +155,28 @@ export class CaptureSession {
     this.startedAtIso = new Date().toISOString();
     this.recorder.start();
     this.index = 0;
+    if (!this.autoAdvance) this.manualAdvanceUsed = true;
+    if (this.devMode) this.devModeUsed = true;
     this.enterPrepare();
+  }
+
+  setAutoAdvance(value: boolean): void {
+    this.autoAdvance = value;
+    if (!value && this.phase !== "idle" && this.phase !== "finished") this.manualAdvanceUsed = true;
+    // Re-arm the timeout: time spent holding must not count against it.
+    if (value && this.phase === "measure") this.phaseUntil = performance.now() + MAX_MEASURE_MS;
+  }
+
+  setDevMode(value: boolean): void {
+    if (this.devMode === value) return;
+    this.devMode = value;
+    if (value && this.phase !== "idle" && this.phase !== "finished") this.devModeUsed = true;
+    // The latch sits in the detector, so it is rebuilt; leaving dev mode also
+    // re-arms the timeout, or the position would expire instantly.
+    if (this.phase === "measure") {
+      this.phaseUntil = performance.now() + MAX_MEASURE_MS;
+      this.retuneCurrent();
+    }
   }
 
   /** One analysed frame. Returns the state for the interface. */
@@ -154,20 +201,26 @@ export class CaptureSession {
     const detector = this.detector;
     if (!detector) return this.view(null, 0);
 
-    const reading = sample ? detector.update(sample) : detector.updateMissing(nowMs);
+    // While an encode runs the detector holds its best back instead of
+    // consuming it - isNewBest therefore never needs a capturing check here.
+    const reading = sample ? detector.update(sample, !this.capturing) : detector.updateMissing(nowMs);
 
-    if (sample && reading.isNewBest && !this.capturing) {
+    if (sample && reading.isNewBest) {
       void this.storeBest(spec, sample, reading.drive);
     }
 
     if (reading.triggered) {
+      // Dev mode: display only - nothing latches, nothing marks, nothing
+      // advances. The detector already reports the momentary condition.
+      if (this.devMode) return this.view(reading, 1);
       this.markTriggered(spec);
+      if (!this.autoAdvance) return this.view(reading, 1);
       this.phase = "confirm";
       this.phaseUntil = nowMs + CONFIRM_MS;
       return this.view(reading, 1);
     }
 
-    if (nowMs >= this.phaseUntil) {
+    if (this.autoAdvance && !this.devMode && nowMs >= this.phaseUntil) {
       this.markTimedOut(spec);
       this.phase = "confirm";
       this.phaseUntil = nowMs + CONFIRM_MS;
@@ -188,8 +241,15 @@ export class CaptureSession {
     }
     const result = this.ensure(spec);
     result.capturedManually = true;
+    if (!this.autoAdvance || this.devMode) return;
     this.phase = "confirm";
     this.phaseUntil = performance.now() + CONFIRM_MS;
+  }
+
+  /** Manual advance - the way forward while auto-advance is off. */
+  next(): void {
+    if (this.phase !== "prepare" && this.phase !== "measure" && this.phase !== "confirm") return;
+    this.advance();
   }
 
   /** Skips the current position without capturing. */
@@ -232,6 +292,8 @@ export class CaptureSession {
       results: this.allResults,
       startedAt: this.startedAtIso,
       durationMs,
+      manualAdvanceUsed: this.manualAdvanceUsed,
+      devModeUsed: this.devModeUsed,
     };
   }
 
@@ -261,6 +323,24 @@ export class CaptureSession {
     if (spec) this.ensure(spec).attempts += 1;
   }
 
+  /**
+   * The rest baseline can be refined after start - the person shifts between
+   * clicking and settling, and a stale baseline pose-gated an entire neutral
+   * position (measured 2026-08-28). Takes effect from the next detector.
+   */
+  setRest(restPose: HeadPose, restMetrics: FaceMetrics): void {
+    this.options.restPose = restPose;
+    this.options.restMetrics = restMetrics;
+  }
+
+  private detectorOptions(): DetectorOptions {
+    return {
+      restPose: this.options.restPose ?? null,
+      restMetrics: this.options.restMetrics ?? null,
+      latchTrigger: !this.devMode,
+    };
+  }
+
   private enterMeasure(): void {
     const spec = this.currentSpec;
     if (!spec) return;
@@ -268,7 +348,7 @@ export class CaptureSession {
     this.phaseUntil = performance.now() + MAX_MEASURE_MS;
     const tuned = tunedSpec(spec);
     this.ensure(spec).thresholds = tuningOf(spec);
-    this.detector = new PositionDetector(tuned);
+    this.detector = new PositionDetector(tuned, this.detectorOptions());
   }
 
   /**
@@ -282,13 +362,19 @@ export class CaptureSession {
     const spec = this.currentSpec;
     if (!spec || this.phase !== "measure") return;
     this.ensure(spec).thresholds = tuningOf(spec);
-    this.detector = new PositionDetector(tunedSpec(spec));
+    this.detector = new PositionDetector(tunedSpec(spec), this.detectorOptions());
   }
 
   private advance(): void {
     const spec = this.currentSpec;
     if (spec && this.detector) {
-      this.ensure(spec).driveSeries = [...this.detector.driveSeries];
+      // Sample timestamps run on the page clock; shifted onto the video
+      // clock so the series lines up with the stills' atMs.
+      const offset = performance.now() - this.recorder.elapsedMs;
+      this.ensure(spec).driveSeries = this.detector.driveSeries.map((s) => ({
+        ...s,
+        t: s.t - offset,
+      }));
     }
     this.detector = null;
 

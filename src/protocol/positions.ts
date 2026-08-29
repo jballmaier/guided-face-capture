@@ -21,8 +21,10 @@ import type { FaceMetrics } from "../vision/geometry";
  * i.e. the eye that closes best. A condition over both eyes can be
  * unattainable.
  *
- * Thresholds for cheek puff, bared teeth and natural smile have not been
- * checked on any device.
+ * First device run 2026-08-28: `noseSneer` and `cheekPuff` did not respond to
+ * real movements - both positions now combine blendshapes with geometry
+ * relative to the rest baseline. Thresholds for bared teeth and natural smile
+ * remain unchecked.
  */
 
 export type PositionId =
@@ -40,16 +42,28 @@ export type PositionId =
   | "smile_natural";
 
 /** Geometric channels, normalised to interocular distance. */
-export type GeomMetric = "interlabialGap" | "mouthWidth" | "eyeOpeningMin" | "eyeOpeningMax";
+export type GeomMetric =
+  | "interlabialGap"
+  | "mouthWidth"
+  | "eyeOpeningMin"
+  | "eyeOpeningMax"
+  | "noseLength"
+  | "cheekWidth";
 
 /**
  * Expression tree yielding a value between 0 and 1. `pair` implements
  * max(left, right) and is the default for anything two-sided.
+ *
+ * `geomRel` ramps over current/rest ratio instead of the absolute value -
+ * for measures that vary too much between faces for a fixed threshold (nose
+ * length, cheek width). Without a rest baseline it reads 0 and leaves the
+ * other channels of an `anyOf` to carry the position.
  */
 export type Signal =
   | { kind: "pair"; left: string; right: string }
   | { kind: "blend"; name: string }
   | { kind: "geom"; metric: GeomMetric; lo: number; hi: number }
+  | { kind: "geomRel"; metric: GeomMetric; lo: number; hi: number }
   | { kind: "max"; of: Signal[] }
   | { kind: "min"; of: Signal[] }
   | { kind: "not"; of: Signal };
@@ -77,6 +91,7 @@ export interface PositionSpec {
 const pair = (left: string, right: string): Signal => ({ kind: "pair", left, right });
 const blend = (name: string): Signal => ({ kind: "blend", name });
 const geom = (metric: GeomMetric, lo: number, hi: number): Signal => ({ kind: "geom", metric, lo, hi });
+const geomRel = (metric: GeomMetric, lo: number, hi: number): Signal => ({ kind: "geomRel", metric, lo, hi });
 const anyOf = (...of: Signal[]): Signal => ({ kind: "max", of });
 const allOf = (...of: Signal[]): Signal => ({ kind: "min", of });
 
@@ -163,11 +178,24 @@ export const POSITIONS: readonly PositionSpec[] = [
   {
     id: "nose_wrinkle",
     index: 5,
-    drive: pair("noseSneerLeft", "noseSneerRight"),
-    // Nose wrinkling scores far lower than a smile - the low threshold is
-    // not an oversight.
+    /**
+     * `noseSneer` alone stayed below 0.15 through twelve seconds of real
+     * attempts (measured 2026-08-28) - on that device the movement showed as
+     * upper-lip raise (`mouthShrugUpper` 0.38, `mouthUpperUp*`) instead.
+     * Those channels plus the shortening of the nose carry the position; the
+     * ramp of the shortening is an uncalibrated assumption.
+     */
+    drive: anyOf(
+      pair("noseSneerLeft", "noseSneerRight"),
+      pair("mouthUpperUpLeft", "mouthUpperUpRight"),
+      blend("mouthShrugUpper"),
+      geomRel("noseLength", 0.97, 0.91),
+    ),
+    // The lip channels also fire on a broad smile - that is a different
+    // position, not a wrinkled nose.
+    suppress: pair("mouthSmileLeft", "mouthSmileRight"),
     minDrive: 0.25,
-    maxSuppress: 1,
+    maxSuppress: 0.5,
     holdMs: 700,
   },
   {
@@ -199,8 +227,20 @@ export const POSITIONS: readonly PositionSpec[] = [
   {
     id: "cheek_puff",
     index: 9,
-    drive: blend("cheekPuff"),
-    suppress: anyOf(LIPS_PARTED, blend("jawOpen")),
+    /**
+     * `cheekPuff` read zero on a genuinely puffed face (measured 2026-08-28,
+     * manual capture) - what did move was the geometry: cheek contour wider,
+     * mouth 5 % narrower. Both enter relative to rest; the ramps are
+     * uncalibrated assumptions.
+     */
+    drive: anyOf(
+      blend("cheekPuff"),
+      geomRel("cheekWidth", 1.02, 1.06),
+      geomRel("mouthWidth", 0.97, 0.93),
+    ),
+    // Pursing also narrows the mouth - suppressing it separates puff from
+    // pucker where the geometry alone cannot.
+    suppress: anyOf(LIPS_PARTED, blend("jawOpen"), blend("mouthPucker"), blend("mouthFunnel")),
     minDrive: 0.3,
     maxSuppress: 0.45,
     holdMs: 700,
@@ -263,6 +303,10 @@ function geomValue(metric: GeomMetric, m: FaceMetrics): number {
       return Math.min(m.eyeOpeningRight, m.eyeOpeningLeft);
     case "eyeOpeningMax":
       return Math.max(m.eyeOpeningRight, m.eyeOpeningLeft);
+    case "noseLength":
+      return m.noseLength;
+    case "cheekWidth":
+      return m.cheekWidth;
   }
 }
 
@@ -295,6 +339,7 @@ export function collectPairs(signal: Signal): BlendshapePair[] {
         break;
       case "blend":
       case "geom":
+      case "geomRel":
         break;
     }
   };
@@ -304,7 +349,12 @@ export function collectPairs(signal: Signal): BlendshapePair[] {
 }
 
 /** Evaluates a signal tree against one frame. Result in 0..1. */
-export function evaluateSignal(signal: Signal, bs: Blendshapes, m: FaceMetrics): number {
+export function evaluateSignal(
+  signal: Signal,
+  bs: Blendshapes,
+  m: FaceMetrics,
+  rest: FaceMetrics | null = null,
+): number {
   switch (signal.kind) {
     case "blend":
       return clamp01(bs[signal.name] ?? 0);
@@ -313,12 +363,18 @@ export function evaluateSignal(signal: Signal, bs: Blendshapes, m: FaceMetrics):
       return clamp01(Math.max(bs[signal.left] ?? 0, bs[signal.right] ?? 0));
     case "geom":
       return ramp(geomValue(signal.metric, m), signal.lo, signal.hi);
+    case "geomRel": {
+      if (!rest) return 0;
+      const base = geomValue(signal.metric, rest);
+      if (base <= 0) return 0;
+      return ramp(geomValue(signal.metric, m) / base, signal.lo, signal.hi);
+    }
     case "max":
-      return signal.of.reduce((acc, s) => Math.max(acc, evaluateSignal(s, bs, m)), 0);
+      return signal.of.reduce((acc, s) => Math.max(acc, evaluateSignal(s, bs, m, rest)), 0);
     case "min":
-      return signal.of.reduce((acc, s) => Math.min(acc, evaluateSignal(s, bs, m)), 1);
+      return signal.of.reduce((acc, s) => Math.min(acc, evaluateSignal(s, bs, m, rest)), 1);
     case "not":
-      return 1 - evaluateSignal(signal.of, bs, m);
+      return 1 - evaluateSignal(signal.of, bs, m, rest);
   }
 }
 

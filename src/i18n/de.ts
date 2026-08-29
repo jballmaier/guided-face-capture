@@ -35,6 +35,8 @@ export const de: Dictionary = {
   "stage.tunedBadge": "Schwellen verändert — keine protokollkonforme Aufnahme",
   "stage.step": "Position {number} von {count}",
   "stage.soon": "Gleich: {instruction}",
+  "stage.captured": "ausgelöst, „Weiter“ wenn bereit",
+  "stage.wouldTrigger": "würde jetzt auslösen (Dev-Modus)",
 
   // ---------------------------------------------------------------- Review
   "review.title": "Aufnahmen prüfen",
@@ -51,6 +53,7 @@ export const de: Dictionary = {
   "tab.positions": "Positionen",
   "tab.debug": "Messwerte",
   "tab.tuning": "Schwellen",
+  "poslist.jump": "Zu dieser Position springen – die Aufzeichnung läuft weiter",
 
   // --------------------------------------------------------------- Thresholds
   "tuning.note":
@@ -89,6 +92,7 @@ export const de: Dictionary = {
   "debug.sharpness": "Schärfe",
   "debug.luminance": "Helligkeit",
   "debug.clipping": "Clipping",
+  "debug.clippingDark": "Schwarzanteil",
   "debug.interocular": "Augenabstand",
   "debug.interlabial": "Lippenspalt",
   "debug.position": "Position",
@@ -115,8 +119,15 @@ export const de: Dictionary = {
   "btn.switch": "Kamera wechseln",
   "btn.run": "Aufnahme starten",
   "btn.shutter": "Jetzt auslösen",
+  "btn.next": "Weiter",
   "btn.skip": "Überspringen",
   "btn.export": "Als ZIP speichern",
+  "flow.auto": "Automatisch weiter",
+  "flow.auto.title":
+    "Bei Auslösung oder Zeitablauf automatisch zur nächsten Position. Aus: Die Sequenz bleibt auf jeder Position stehen, bis „Weiter“ gedrückt wird – Raum, die Schwellen am laufenden Signal einzustellen.",
+  "flow.dev": "Dev-Modus",
+  "flow.dev.title":
+    "Kalibriermodus: Die Sequenz bleibt auf jeder Position stehen, und der Auslöser wird nur angezeigt, löst aber nie aus – beim Schwellenjustieren sehen, wann er greifen würde. Läufe sind im Manifest markiert.",
   "field.camera": "Kamera",
   "field.file": "Videodatei",
   "field.file.title":
@@ -133,6 +144,8 @@ export const de: Dictionary = {
   "status.finishing": "Aufzeichnung wird abgeschlossen …",
   "status.packing": "Paket wird geschnürt …",
   "status.saved": "Gespeichert: {total} MB gesamt, davon {video} MB Video ({seconds} s)",
+  "status.cropSaving":
+    "ein Gesichts-Zuschnitt hätte {percent} % der Standbilder gespart ({full} → {cropped} MB)",
   "status.repeat": "Wiederholung",
   "status.error": "Fehler: {message}",
 
