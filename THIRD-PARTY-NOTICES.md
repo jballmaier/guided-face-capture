@@ -10,7 +10,6 @@ not part of the distribution.
 |---|---|---|---|
 | `@mediapipe/tasks-vision` — library and WASM runtime | [google-ai-edge/mediapipe](https://github.com/google-ai-edge/mediapipe) | 2019 The MediaPipe Authors | Apache 2.0 — `licenses/Apache-2.0.txt` |
 | `face_landmarker.task` — model, fetched by `npm run assets` | [Model card](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) | 2019 The MediaPipe Authors | Apache 2.0 — `licenses/Apache-2.0.txt` |
-| `fflate` — ZIP creation | [101arrowz/fflate](https://github.com/101arrowz/fflate) | 2026 Arjun Barrett | MIT — `licenses/fflate-MIT.txt` |
 
 ## Citation
 

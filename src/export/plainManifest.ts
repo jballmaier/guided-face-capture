@@ -1,42 +1,44 @@
 import type { CameraProbe } from "../capture/capabilities";
 import type { Recording } from "../capture/recorder";
 import type { CueEvent } from "../basic/cues";
-import type { VoiceInfo } from "../basic/voice";
-import {
-  positionLabelIn,
-  positionSlug,
-  POSITIONS,
-  type PositionId,
-  type PositionSpec,
-} from "../protocol/positions";
+import { POSITIONS, type PositionId, type PositionSpec } from "../protocol/positions";
 import { collectDeviceInfo, round } from "./manifest";
-import { clipFileName, windowOf, windowOfKind, type ClipAttempt } from "./videoManifest";
 import {
-  HOLD_MS,
-  LEAD_MS,
-  NEUTRAL_HOLD_MS,
-  RELEASE_MS,
-  REPETITIONS,
-  TAIL_MS,
-} from "../basic/cues";
+  audioBlock,
+  cameraBlock,
+  clipFileName,
+  positionHead,
+  protocolBlock,
+  sessionBlock,
+  TIMEBASE_BLOCK,
+  VIDEO_MANIFEST_VERSION,
+  windowOf,
+  windowOfKind,
+  type AudioBlockInput,
+  type ClipAttempt,
+} from "./videoManifest";
 import type { Locale } from "../i18n";
 
 /**
  * Manifest der Nur-Video-Seite: gleicher Takt, andere Aufnahmekette.
  *
  * Das Protokoll ist dasselbe wie auf der gefuehrten Seite - ein Clip je
- * Position, Vorlauf, Halten, Nachlauf. Was fehlt, fehlt absichtlich: keine
- * Analyse, kein Zuschnitt, keine Rahmenwache. Der MediaRecorder zapft den
- * Kamerastrom direkt an, deshalb gibt es hier keine gezeichneten Bilder zu
- * zaehlen - nur, was das Vorschau-Element nebenbei geliefert hat.
+ * Position, Vorlauf, Halten, Nachlauf; die geteilten Bloecke kommen deshalb
+ * aus `videoManifest.ts`. Was fehlt, fehlt absichtlich: keine Analyse, kein
+ * Zuschnitt, keine Rahmenwache. Der MediaRecorder zapft den Kamerastrom
+ * direkt an, deshalb gibt es hier keine gezeichneten Bilder zu zaehlen -
+ * nur, was das Vorschau-Element nebenbei geliefert hat.
  */
 
 export interface PlainClipResult {
   spec: PositionSpec;
   recording: Recording;
   events: readonly CueEvent[];
-  /** Bilder, die das Vorschau-Element waehrend des Clips angezeigt hat. */
-  previewFrames: number;
+  /** Bilder, die das Vorschau-Element waehrend des Clips angezeigt hat.
+   *  `null`, wenn der Browser sie nicht zaehlen kann (kein
+   *  `requestVideoFrameCallback`) - dann wuerde die Zahl nur den
+   *  Bildschirmtakt wiedergeben, das Gegenteil der gesuchten Auskunft. */
+  previewFrames: number | null;
   startedAt: string;
   startedAtEpochMs: number;
   attempt: number;
@@ -60,7 +62,7 @@ export interface PlainManifestInput {
   frameRateFloor: number | null;
   cameraLabel: string;
   isFrontFacing: boolean;
-  audio: { mode: string; speech: VoiceInfo; announcements: string };
+  audio: AudioBlockInput;
 }
 
 export function buildPlainManifest(input: PlainManifestInput): Record<string, unknown> {
@@ -68,50 +70,25 @@ export function buildPlainManifest(input: PlainManifestInput): Record<string, un
   const recordedMs = kept.reduce((sum, c) => sum + c.recording.durationMs, 0);
 
   return {
-    manifestVersion: 2,
+    manifestVersion: VIDEO_MANIFEST_VERSION,
     /** Unterscheidet dieses Buendel von den Clips mit Zuschnitt. */
     profile: "guided-video-clips-plain",
-    protocol: {
-      id: "expression-set-12",
-      variant: "guided-clips-3x1s",
-      description:
-        "Twelve standardised facial expressions, one clip per position: a second at rest, three one-second holds, a second at rest. Cued acoustically; the announcement runs before the clip and is in no file.",
-      repetitions: REPETITIONS,
-      holdMs: HOLD_MS,
-      releaseMs: RELEASE_MS,
-      neutralHoldMs: NEUTRAL_HOLD_MS,
-      leadMs: LEAD_MS,
-      tailMs: TAIL_MS,
-    },
-    session: {
+    protocol: protocolBlock(),
+    session: sessionBlock({
       locale: input.locale,
       startedAt: input.startedAt,
       endedAt: input.endedAt,
-      wallMs: Math.round(input.wallMs),
-      recordedMs: Math.round(recordedMs),
-      clipsPlanned: POSITIONS.length,
+      wallMs: input.wallMs,
+      recordedMs,
       clipsRecorded: kept.length,
-      attempts: input.attempts.length,
+      attempts: input.attempts,
       abortedReason: input.abortedReason,
-      clipOrder: input.attempts.map((a) => ({
-        id: a.id,
-        attempt: a.attempt,
-        kept: a.kept,
-        discardReason: a.discardReason,
-        startedAtEpochMs: a.startedAtEpochMs,
-        durationMs: Math.round(a.durationMs),
-      })),
-    },
-    timebase: {
-      origin: "clip-start",
-      clock: "performance.now",
-      unit: "ms",
-      note: "Every clip has its own zero. All times under positions[] are relative to that clip; positions[].timebase carries its wall-clock anchor. Cue times are measured, not planned - plannedMs states what was asked for.",
-    },
+    }),
+    timebase: TIMEBASE_BLOCK,
     capture: {
       pipeline: {
         kind: "camera-stream-direct",
-        note: "MediaRecorder taps the camera stream itself - no canvas, no re-encode, no analysis. previewFrames under positions[].video counts frames the preview element presented; a lower bound on camera delivery, not the encoder's rate.",
+        note: "MediaRecorder taps the camera stream itself - no canvas, no re-encode, no analysis. previewFrames under positions[].video counts frames the preview element presented (a lower bound on camera delivery, not the encoder's rate); null when the browser cannot count delivered frames.",
       },
       video: {
         videoBitsPerSecond: input.videoBitsPerSecond,
@@ -121,29 +98,11 @@ export function buildPlainManifest(input: PlainManifestInput): Record<string, un
       },
       /** Kein Zuschnitt - die Dateien zeigen das volle Kamerabild. */
       crop: null,
-      camera: {
-        label: input.cameraLabel,
-        isFrontFacing: input.isFrontFacing,
-        width: input.cameraSettings.width ?? null,
-        height: input.cameraSettings.height ?? null,
-        frameRate: input.cameraSettings.frameRate ?? null,
-        deviceId: input.cameraSettings.deviceId ?? null,
-        facingMode: input.cameraSettings.facingMode ?? null,
-        resizeMode: input.cameraProbe?.delivered.resizeMode ?? null,
-        offered: input.cameraProbe?.offered ?? null,
-        offeredFactor: input.cameraProbe?.videoFactor ?? null,
-        frameRateFloor: input.frameRateFloor,
-      },
+      camera: cameraBlock(input),
       mirrorApplied: false,
       sideMarkers: false,
     },
-    audio: {
-      mode: input.audio.mode,
-      speech: input.audio.speech,
-      /** verbose | brief | tones - wie viel vor jedem Clip gesprochen wurde. */
-      announcements: input.audio.announcements,
-      note: "Announcements play before each clip and are in no file. The clips carry no audio track.",
-    },
+    audio: audioBlock(input.audio),
     /** Bewusst null: auf dieser Seite laeuft kein Modell. */
     model: null,
     device: collectDeviceInfo(),
@@ -158,22 +117,16 @@ function describePosition(
   clip: PlainClipResult | undefined,
   locale: Locale,
 ): Record<string, unknown> {
-  const head = {
-    id: spec.id,
-    index: spec.index,
-    slug: positionSlug(spec),
-    label: positionLabelIn("en", spec),
-    labelSpoken: positionLabelIn(locale, spec),
-  };
+  const head = positionHead(spec, locale);
 
   if (!clip) {
     return { ...head, recorded: false, video: null, holds: [] };
   }
 
   const previewFps =
-    clip.recording.durationMs > 0
-      ? (clip.previewFrames * 1000) / clip.recording.durationMs
-      : 0;
+    clip.previewFrames !== null && clip.recording.durationMs > 0
+      ? round((clip.previewFrames * 1000) / clip.recording.durationMs, 1)
+      : null;
 
   return {
     ...head,
@@ -186,7 +139,7 @@ function describePosition(
       bytes: clip.recording.bytes,
       durationMs: Math.round(clip.recording.durationMs),
       previewFrames: clip.previewFrames,
-      previewFrameRate: round(previewFps, 1),
+      previewFrameRate: previewFps,
     },
     timebase: {
       startedAt: clip.startedAt,

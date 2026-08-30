@@ -41,7 +41,7 @@ import {
   type PositionSpec,
 } from "../protocol/positions";
 import {
-  announcementFor,
+  beginAnnouncement,
   buildPositionScript,
   CueRunner,
   loadAnnounceMode,
@@ -170,10 +170,14 @@ const btnRepeat = el<HTMLButtonElement>("btn-repeat");
 const btnAbort = el<HTMLButtonElement>("btn-abort");
 const btnExport = el<HTMLButtonElement>("btn-export");
 const btnAgain = el<HTMLButtonElement>("btn-again");
+const btnSettings = el<HTMLButtonElement>("btn-settings");
 const status = el<HTMLElement>("status");
 
 let state: BasicState = "idle";
 let phase: RunPhase = "armed";
+/** Gegen ueberlappende Oeffnungen - der Verlierer liesse sonst einen nie
+ *  gestoppten Kamerastrom zurueck. */
+let openingCamera = false;
 let announceMode: AnnounceMode = loadAnnounceMode();
 /** Modus der laufenden Sitzung - eingefroren, damit das Manifest nicht luegt,
  *  wenn der Regler nach der Sitzung umgestellt wird. */
@@ -205,6 +209,8 @@ let sessionBitrate = 0;
 let startedAt = "";
 let endedAt = "";
 let sessionWallStart = 0;
+/** Beim Sitzungsende eingefroren - nicht erst beim Klick auf "Sichern". */
+let sessionWallMs = 0;
 let abortedReason: string | null = null;
 
 /**
@@ -271,7 +277,9 @@ function reportError(err: unknown): void {
 
 function renderButtons(): void {
   const running = state === "running";
-  btnStart.hidden = running;
+  // Im Fertig-Zustand keinen Kamerawechsel anbieten: er wuerfe die Sitzung
+  // weg, bevor sie gesichert ist. "Neue Aufnahme" ist der Weg.
+  btnStart.hidden = running || state === "done";
   btnFrame.hidden = state !== "aligning";
   btnGuide.hidden = state !== "framing";
   btnBack.hidden = state !== "framing";
@@ -301,6 +309,9 @@ function renderButtons(): void {
   rateSelect.disabled = locked;
   announceSelect.disabled = locked;
   toggleFullFrame.disabled = locked;
+  // Das Blatt ist modal und legte sich sonst mitten in der Aufnahme ueber
+  // Anweisung und Stopp-Knopf.
+  btnSettings.disabled = locked;
 }
 
 let hintsShown = "";
@@ -339,16 +350,14 @@ function promptHeading(spec: PositionSpec, extra?: string): string {
   return extra ? `${base} - ${extra}` : base;
 }
 
-/** Ansage- und Bereitschaftsanzeige - hier laeuft keine Aufnahme. */
-function showPosition(spec: PositionSpec, armed: boolean): void {
+/** Bereitschaftsanzeige - der Knopf ist scharf, hier laeuft keine Aufnahme. */
+function showPosition(spec: PositionSpec): void {
   prompt.hidden = false;
   progressFill.style.width = "0%";
   progressFill.classList.remove("ready");
   promptStep.textContent = promptHeading(spec);
   promptTitle.textContent = positionLabel(spec);
-  promptInstruction.textContent = armed
-    ? `${positionInstruction(spec)} — ${t("basic.armed")}`
-    : positionInstruction(spec);
+  promptInstruction.textContent = `${positionInstruction(spec)} — ${t("basic.armed")}`;
 }
 
 function showStep(step: CueStep, at: number, total: number): void {
@@ -370,6 +379,10 @@ function showStep(step: CueStep, at: number, total: number): void {
 // ------------------------------------------------------------------- Kamera
 
 async function startCamera(): Promise<void> {
+  // Ein zweiter Aufruf waehrend des Oeffnens verloere den Strom des ersten -
+  // niemand stoppte ihn je, die Kamera-LED bliebe an.
+  if (openingCamera) return;
+  openingCamera = true;
   btnStart.disabled = true;
   try {
     if (!landmarker) {
@@ -413,9 +426,17 @@ async function startCamera(): Promise<void> {
     setStatus(cameraLine);
   } catch (err) {
     reportError(err);
+    // Ohne Kamera ist nichts auszurichten: zurueck auf Anfang statt einer
+    // toten Buehne.
+    if (!camera) {
+      state = "idle";
+      stageEmpty.hidden = false;
+      renderButtons();
+    }
   } finally {
+    openingCamera = false;
     btnStart.disabled = false;
-    btnStart.textContent = t("btn.switch");
+    btnStart.textContent = camera ? t("btn.switch") : t("btn.start");
   }
 }
 
@@ -583,9 +604,12 @@ async function startGuidance(): Promise<void> {
   if (!recorder || !camera || !cropRect) return;
 
   // Ton synchron in der Geste freischalten - ein `await` davor verbraucht sie
-  // auf iOS. Die Freigabe gilt danach fuer die ganze Sitzung.
+  // auf iOS. Die Freigabe gilt danach fuer die ganze Sitzung; der alte
+  // Klangkontext wird geschlossen, sonst sammeln sich mit jeder Sitzung
+  // AudioContexte an, bis der Browser keinen mehr hergibt.
   sessionLocale = getLocale();
   sessionAnnounce = announceMode;
+  voice?.close();
   voice = Voice.unlock(sessionLocale);
   voiceInfo = voice.info;
   voiceMode = voiceInfo.available && sessionAnnounce !== "tones" ? "speech+tones" : "tones";
@@ -623,32 +647,21 @@ async function runSequence(only: PositionId | null): Promise<void> {
     //    sie ab - niemand muss sie zu Ende hoeren.
     phase = "armed";
     renderButtons();
-    showPosition(spec, true);
+    showPosition(spec);
     renderHints([]);
     setStatus(`${promptHeading(spec)}: ${positionLabel(spec)} - ${t("basic.armed")}`);
 
     voice?.tone("next");
-    if (sessionAnnounce === "tones") {
-      lastAnnouncement = null;
-    } else {
-      const announcement = announcementFor(spec, sessionLocale, {
-        sayPattern: !patternSpoken,
-        brief: sessionAnnounce === "brief",
-      });
-      if (announcement.sayPattern) patternSpoken = true;
-      // Die Dauer traegt sich selbst nach, sobald die Sprache endet - auch
-      // beim Abbruch durch den Knopf, der `speak` aufloest.
-      const captured = { text: announcement.text, wallMs: 0 };
-      lastAnnouncement = captured;
-      const wallStart = performance.now();
-      void voice?.speak(announcement.text).then(() => {
-        captured.wallMs = Math.round(performance.now() - wallStart);
-      });
-    }
+    const announce = beginAnnouncement(voice, spec, sessionLocale, {
+      mode: sessionAnnounce,
+      sayPattern: !patternSpoken,
+    });
+    if (announce.spokePattern) patternSpoken = true;
+    lastAnnouncement = announce.record;
 
     const go = await waitForSignal();
     // Was auch immer folgt - die Ansage endet, bevor etwas anderes beginnt.
-    voice?.cancel();
+    announce.stop();
     if (go === "abort") return;
     if (go === "repeat") {
       i = repeatTarget(order, i);
@@ -683,7 +696,11 @@ function repeatTarget(order: readonly PositionSpec[], current: number): number {
  * Sekunden noch einmal sind billiger als ein unbrauchbarer Datensatz.
  */
 async function recordClip(spec: PositionSpec): Promise<"kept" | "discarded" | "abort"> {
-  if (!recorder || !cropRect || !voice) return "abort";
+  if (!recorder || !cropRect || !voice) {
+    // Muss als Abbruch sichtbar werden, nicht als still gelungene Sitzung.
+    abortedReason ??= "no-camera";
+    return "abort";
+  }
 
   const attempt = (attemptsOf.get(spec.id) ?? 0) + 1;
   attemptsOf.set(spec.id, attempt);
@@ -710,8 +727,16 @@ async function recordClip(spec: PositionSpec): Promise<"kept" | "discarded" | "a
   const faceAtEnd = sampleFace(cropRect) === "inside";
   stopFrameWatch();
 
-  const captured = await recorder.stop();
+  // Der Verwerfen-Wunsch zaehlt nur bis zum Ende des Taktes: verschwindet die
+  // Seite erst waehrend des Stopps, ist der Clip laengst vollstaendig.
   const discarded = discardRequested;
+  const captured = await recorder.stop();
+
+  // Manche Encoder liefern alle Daten erst beim Stop (MP4 auf Chromium und
+  // iOS) - eine leere Aufnahme faellt deshalb erst hier sicher auf.
+  if (captured.recording.bytes === 0 && abortedReason === null && discarded === null) {
+    abortedReason = "no-video-data";
+  }
   const aborted = abortedReason !== null;
 
   attemptLog.push({
@@ -751,6 +776,7 @@ function endSession(): void {
   stopFrameWatch();
   prompt.hidden = true;
   endedAt = new Date().toISOString();
+  sessionWallMs = performance.now() - sessionWallStart;
   state = "done";
   renderButtons();
   void setWakeLock(wakeWanted());
@@ -793,10 +819,16 @@ function endSession(): void {
 /**
  * Frueher Abbruch statt leerer Datei: liefert der Browser nach ein paar
  * Sekunden keinen Datenblock, traegt die Aufnahme auf diesem Geraet nicht.
+ *
+ * Nur fuer WebM: die MP4-Muxer von Chromium und iOS ignorieren die
+ * Zeitscheibe und liefern alles erst beim Stop (gemessen 2026-08-30) - dort
+ * beweist ein leerer Zwischenstand nichts, und der Wachhund braeche gesunde
+ * Aufnahmen ab. Leere MP4-Aufnahmen faengt die Byte-Pruefung nach dem Stop.
  */
 function watchChunks(): void {
   setTimeout(() => {
     if (state !== "running" || phase !== "clip" || !recorder) return;
+    if (!recorder.mimeType.includes("webm")) return;
     if (recorder.chunkCount > 0) return;
     abortRun("no-video-data");
     setStatus(t("basic.noData"), true);
@@ -986,15 +1018,22 @@ async function exportBundle(): Promise<void> {
   if (clips.size === 0 || exporting || !cropRect) return;
   exporting = true;
   btnExport.disabled = true;
+  // Waehrend des Packens nichts wegraeumen lassen: "Neue Aufnahme" mitten im
+  // Export leerte die Clip-Liste unter dem laufenden Durchlauf.
+  btnAgain.disabled = true;
+  btnRepeat.disabled = true;
   try {
     setStatus(t("status.packing"));
+    // Eingefrorener Stand - ein Klick waehrend des Packens aendert nicht
+    // mehr, was ins Paket kommt.
+    const snapshot = new Map(clips);
     const manifest = buildVideoManifest({
       locale: sessionLocale,
       startedAt,
       endedAt,
-      wallMs: performance.now() - sessionWallStart,
+      wallMs: sessionWallMs,
       abortedReason,
-      clips,
+      clips: snapshot,
       attempts: attemptLog,
       fullFrame: toggleFullFrame.checked,
       requestedFps: RECORD_FPS,
@@ -1024,14 +1063,13 @@ async function exportBundle(): Promise<void> {
       model: landmarker?.modelInfo ?? null,
     });
 
-    const files: Record<string, Uint8Array | string> = {};
-    // Nacheinander lesen: beim Packen liegen die Daten ohnehin ein zweites Mal
-    // im Speicher, also nicht auch noch alle Blobs gleichzeitig kopieren.
-    for (const clip of clips.values()) {
-      const name = clipFileName(clip.spec, clip.captured.recording.mimeType);
-      files[name] = new Uint8Array(await clip.captured.recording.blob.arrayBuffer());
+    const files: Record<string, Uint8Array | string | Blob> = {};
+    // Die Blobs wandern unkopiert ins ZIP - siehe zipStore.ts.
+    for (const clip of snapshot.values()) {
+      files[clipFileName(clip.spec, clip.captured.recording.mimeType)] =
+        clip.captured.recording.blob;
     }
-    if (restStill) files["rest_full.jpg"] = new Uint8Array(await restStill.blob.arrayBuffer());
+    if (restStill) files["rest_full.jpg"] = restStill.blob;
     files["manifest.json"] = JSON.stringify(manifest, null, 2);
     files["README.txt"] = readme();
 
@@ -1041,7 +1079,7 @@ async function exportBundle(): Promise<void> {
 
     setStatus(
       t("basic.savedZip", {
-        clips: clips.size,
+        clips: snapshot.size,
         total: (blob.size / 1024 / 1024).toFixed(1),
       }),
     );
@@ -1050,6 +1088,8 @@ async function exportBundle(): Promise<void> {
   } finally {
     exporting = false;
     btnExport.disabled = false;
+    btnAgain.disabled = false;
+    btnRepeat.disabled = false;
   }
 }
 
@@ -1097,7 +1137,8 @@ btnRepeat.addEventListener("click", () => {
     return;
   }
   // Nach der Sitzung: die eine Position nachholen, danach wieder abschliessen.
-  if (state === "done" && lastRecorded) {
+  // Nur mit stehender Aufnahmekette - sonst endete der Versuch als Leerlauf.
+  if (state === "done" && lastRecorded && recorder && camera) {
     const target = lastRecorded;
     state = "running";
     abortedReason = null;
@@ -1117,13 +1158,24 @@ btnAgain.addEventListener("click", () => {
   attemptsOf.clear();
   attemptLog = [];
   lastRecorded = null;
-  enterAligning();
+  // Eine im Fertig-Zustand geaenderte Kamerawahl greift jetzt - waehrend die
+  // Clips noch ungesichert waren, blieb sie absichtlich liegen.
+  const activeDevice = camera?.settings.deviceId;
+  if (cameraSelect.value !== "" && activeDevice !== undefined && cameraSelect.value !== activeDevice) {
+    void startCamera();
+  } else {
+    enterAligning();
+  }
 });
 
-cameraSelect.addEventListener("change", () => void startCamera());
+// Im Fertig-Zustand nicht neu oeffnen: das wuerfe die Sitzung weg, bevor sie
+// gesichert ist. Die Wahl bleibt stehen und greift bei "Neue Aufnahme".
+cameraSelect.addEventListener("change", () => {
+  if (state !== "done" && state !== "running") void startCamera();
+});
 
 initSettingsSheet(
-  el<HTMLButtonElement>("btn-settings"),
+  btnSettings,
   el<HTMLDialogElement>("settings"),
   el<HTMLButtonElement>("btn-settings-close"),
 );

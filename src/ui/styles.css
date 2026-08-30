@@ -696,10 +696,12 @@ dialog.sheet h2 {
     border-bottom: none;
   }
 
-  /* Die Erklaerzeile ist auf kleinen Schirmen Platz, kein Inhalt - der
-     Hinweis auf der leeren Buehne sagt dasselbe. */
+  /* Kleiner, aber sichtbar: die Zeile traegt das Datenschutzversprechen
+     ("alles bleibt auf diesem Geraet") - und das gehoert genau auf das
+     Geraet, mit dem aufgenommen wird. */
   .bar .note {
-    display: none;
+    font-size: 11px;
+    line-height: 1.35;
   }
 }
 

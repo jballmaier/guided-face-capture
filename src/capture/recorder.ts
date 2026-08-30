@@ -50,14 +50,6 @@ export const MP4_FIRST_MIME_CANDIDATES = [
   "video/webm",
 ] as const;
 
-export function pickMimeType(): string | null {
-  if (typeof MediaRecorder === "undefined") return null;
-  for (const candidate of MIME_CANDIDATES) {
-    if (MediaRecorder.isTypeSupported(candidate)) return candidate;
-  }
-  return null;
-}
-
 export function fileExtensionFor(mimeType: string): string {
   return mimeType.includes("mp4") ? "mp4" : "webm";
 }

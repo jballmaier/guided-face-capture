@@ -65,8 +65,8 @@ come from the full frame.
 
 ## Languages
 
-English is the default, German is complete. The switch is at the top and the
-choice is remembered; the browser language is not consulted. To add a language,
+English is the default, German is complete. The switch sits in the settings
+sheet and the choice is remembered; the browser language is not consulted. To add a language,
 copy `src/i18n/en.ts`, translate, and register it in `src/i18n/index.ts` — every
 locale is typed against English, so the compiler names any missing key.
 
@@ -83,7 +83,7 @@ session language recorded under `session.locale`.
 ## Third-party components and licence
 
 Shipped with the page: **MediaPipe Tasks Vision** including WASM runtime and the
-face landmark model (Apache 2.0), and **fflate** (MIT). Details in
+face landmark model (Apache 2.0). Details in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md), full texts in
 [`licenses/`](licenses/). The build copies both into `dist/`, so they travel
 with a self-hosted copy.
@@ -140,8 +140,9 @@ Standbilder stammen aus dem vollen Bild.
 
 ## Sprachen
 
-Englisch ist die Vorgabe, Deutsch vollständig. Umgeschaltet wird oben, die Wahl
-bleibt gespeichert; die Browsersprache wird nicht ausgewertet. Eine Sprache
+Englisch ist die Vorgabe, Deutsch vollständig. Umgeschaltet wird im
+Einstellungs-Blatt, die Wahl bleibt gespeichert; die Browsersprache wird nicht
+ausgewertet. Eine Sprache
 dazunehmen: `src/i18n/en.ts` kopieren, übersetzen, in `src/i18n/index.ts`
 eintragen.
 
