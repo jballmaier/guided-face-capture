@@ -97,17 +97,48 @@ export interface Announcement {
 }
 
 /**
+ * Wie viel gesprochen wird.
+ *
+ * `verbose` sagt Name und Anleitung, `brief` nur den Namen - die Anleitung
+ * steht ohnehin auf dem Bildschirm. `tones` laesst die Sprache ganz weg; die
+ * Toene tragen den Takt allein, auch bei geschlossenen Augen. Die Wahl bleibt
+ * gespeichert und steht im Manifest.
+ */
+export type AnnounceMode = "verbose" | "brief" | "tones";
+
+const ANNOUNCE_STORAGE_KEY = "guided-face-capture.announce";
+
+export function loadAnnounceMode(): AnnounceMode {
+  try {
+    const value = localStorage.getItem(ANNOUNCE_STORAGE_KEY);
+    if (value === "verbose" || value === "brief" || value === "tones") return value;
+  } catch {
+    // Ohne Speicher gilt die Vorgabe.
+  }
+  return "verbose";
+}
+
+export function saveAnnounceMode(mode: AnnounceMode): void {
+  try {
+    localStorage.setItem(ANNOUNCE_STORAGE_KEY, mode);
+  } catch {
+    // Die Wahl gilt dann nur fuer diese Sitzung.
+  }
+}
+
+/**
  * Was vor dem Clip gesagt wird.
  *
  * Getrennt vom Takt, weil es in keiner Datei landet. Das Muster "dreimal, je
  * eine Sekunde" gilt fuer die ganze Folge und wird deshalb einmal gesagt, nicht
  * zwoelfmal - der Aufrufer entscheidet wann, weil nur er weiss, ob es schon
- * gesagt wurde.
+ * gesagt wurde. Auch `brief` behaelt das Muster und den Halten-Hinweis der
+ * Ruheposition: beides ist Taktwissen, keine Wiederholung des Bildschirms.
  */
 export function announcementFor(
   spec: PositionSpec,
   locale: Locale,
-  options: { sayPattern: boolean },
+  options: { sayPattern: boolean; brief?: boolean },
 ): Announcement {
   const single = spec.id === NEUTRAL_ID;
   const sayPattern = !single && options.sayPattern;
@@ -116,9 +147,8 @@ export function announcementFor(
   if (single) suffix = tIn(locale, "basic.announceHold");
   else if (sayPattern) suffix = tIn(locale, "basic.announceSuffix");
 
-  const text = `${positionLabelIn(locale, spec)}. ${instructionIn(locale, spec)}${
-    suffix ? ` ${suffix}` : ""
-  }`;
+  const body = options.brief ? "" : ` ${instructionIn(locale, spec)}`;
+  const text = `${positionLabelIn(locale, spec)}.${body}${suffix ? ` ${suffix}` : ""}`;
   return { text, sayPattern };
 }
 

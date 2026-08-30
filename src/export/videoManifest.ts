@@ -127,11 +127,11 @@ export interface VideoManifestInput {
   rest: RestSnapshot | null;
   faceBox: FaceBoxSnapshot | null;
   restStill: { file: string; width: number; height: number; bytes: number } | null;
-  audio: { mode: string; speech: VoiceInfo };
+  audio: { mode: string; speech: VoiceInfo; announcements: string };
   model: ModelInfo | null;
 }
 
-interface CueWindow {
+export interface CueWindow {
   startMs: number;
   endMs: number;
   plannedMs: number;
@@ -276,6 +276,8 @@ export function buildVideoManifest(input: VideoManifestInput): Record<string, un
     audio: {
       mode: input.audio.mode,
       speech: input.audio.speech,
+      /** verbose | brief | tones - wie viel vor jedem Clip gesprochen wurde. */
+      announcements: input.audio.announcements,
       note: "Announcements play before each clip and are in no file. The clips carry no audio track.",
     },
     model: input.model
@@ -346,22 +348,23 @@ function describePosition(
     /** Was vor der Aufnahme gesagt wurde - in dieser Datei ist es nicht. */
     announcement: clip.announcement,
     /** Alle Zeiten ab Beginn dieses Clips. */
-    lead: windowOfKind(clip, "lead"),
+    lead: windowOfKind(clip.events, "lead"),
     holds: clip.events
       .filter((e) => e.step.kind === "hold")
       .map((e) => ({ rep: e.step.rep, ...windowOf(e) })),
-    tail: windowOfKind(clip, "tail"),
+    tail: windowOfKind(clip.events, "tail"),
     frameWatch: clip.frameWatch,
     faceInsideCrop: clip.faceInsideCrop,
   };
 }
 
-function windowOfKind(clip: ClipResult, kind: string): CueWindow | null {
-  const event = clip.events.find((e) => e.step.kind === kind);
+/** Auch vom Plain-Manifest genutzt - gleicher Takt, andere Aufnahmekette. */
+export function windowOfKind(events: readonly CueEvent[], kind: string): CueWindow | null {
+  const event = events.find((e) => e.step.kind === kind);
   return event ? windowOf(event) : null;
 }
 
-function windowOf(event: CueEvent): CueWindow {
+export function windowOf(event: CueEvent): CueWindow {
   return {
     startMs: Math.round(event.startMs),
     endMs: Math.round(event.endMs),

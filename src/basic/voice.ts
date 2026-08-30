@@ -193,7 +193,9 @@ export class Voice {
       const utter = new SpeechSynthesisUtterance(text);
       utter.voice = voice;
       utter.lang = voice.lang;
-      utter.rate = 1;
+      // Leicht ueber Normal: die Systemstimmen lesen behaebig, und die Ansage
+      // steht ohnehin auch auf dem Bildschirm.
+      utter.rate = 1.1;
       speaking = utter;
 
       let settled = false;

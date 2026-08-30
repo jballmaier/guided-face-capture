@@ -13,18 +13,7 @@
 
         <div class="viewopts">
           <a class="navlink" href="./basic.html" data-i18n="nav.basic">Guided video</a>
-          <label class="field">
-            <span data-i18n="app.language">Language</span>
-            <select id="locale-select"></select>
-          </label>
-          <label class="field">
-            <span data-i18n="view.mesh">Mesh</span>
-            <select id="mesh-mode">
-              <option value="points" selected data-i18n="view.mesh.points">Points</option>
-              <option value="wire" data-i18n="view.mesh.wire">Points + mesh</option>
-              <option value="off" data-i18n="view.mesh.off">off</option>
-            </select>
-          </label>
+          <a class="navlink" href="./plain.html" data-i18n="nav.plain">Video only</a>
           <label class="field checkbox" data-i18n-title="view.anon.title">
             <input type="checkbox" id="toggle-anon" />
             <span data-i18n="view.anon">Anonymous</span>
@@ -121,26 +110,45 @@
         <button id="btn-next" type="button" data-i18n="btn.next" hidden>Next position</button>
         <button id="btn-skip" type="button" class="ghost" data-i18n="btn.skip" hidden>Skip</button>
         <button id="btn-export" type="button" data-i18n="btn.export" hidden>Save as ZIP</button>
-
-        <label class="field checkbox" data-i18n-title="flow.auto.title">
-          <input type="checkbox" id="toggle-autoadvance" checked />
-          <span data-i18n="flow.auto">Auto-advance</span>
-        </label>
-        <label class="field checkbox" data-i18n-title="flow.dev.title">
-          <input type="checkbox" id="toggle-devmode" />
-          <span data-i18n="flow.dev">Dev mode</span>
-        </label>
-        <label class="field">
-          <span data-i18n="field.camera">Camera</span>
-          <select id="camera-select" disabled></select>
-        </label>
-        <label class="field" data-i18n-title="field.file.title">
-          <span data-i18n="field.file">Video file</span>
-          <input type="file" id="file-input" accept="video/*" />
-        </label>
+        <button id="btn-settings" type="button" class="ghost" data-i18n="settings.open">Settings</button>
 
         <span class="status" id="status"></span>
       </footer>
+
+      <dialog id="settings" class="sheet">
+        <h2 data-i18n="settings.title">Settings</h2>
+        <div class="sheet-fields">
+          <label class="field">
+            <span data-i18n="app.language">Language</span>
+            <select id="locale-select"></select>
+          </label>
+          <label class="field">
+            <span data-i18n="field.camera">Camera</span>
+            <select id="camera-select" disabled></select>
+          </label>
+          <label class="field">
+            <span data-i18n="view.mesh">Mesh</span>
+            <select id="mesh-mode">
+              <option value="points" selected data-i18n="view.mesh.points">Points</option>
+              <option value="wire" data-i18n="view.mesh.wire">Points + mesh</option>
+              <option value="off" data-i18n="view.mesh.off">off</option>
+            </select>
+          </label>
+          <label class="field checkbox" data-i18n-title="flow.auto.title">
+            <input type="checkbox" id="toggle-autoadvance" checked />
+            <span data-i18n="flow.auto">Auto-advance</span>
+          </label>
+          <label class="field checkbox" data-i18n-title="flow.dev.title">
+            <input type="checkbox" id="toggle-devmode" />
+            <span data-i18n="flow.dev">Dev mode</span>
+          </label>
+          <label class="field" data-i18n-title="field.file.title">
+            <span data-i18n="field.file">Video file</span>
+            <input type="file" id="file-input" accept="video/*" />
+          </label>
+        </div>
+        <button id="btn-settings-close" type="button" class="ghost" data-i18n="settings.close">Close</button>
+      </dialog>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

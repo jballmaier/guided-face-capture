@@ -273,6 +273,35 @@ export const de: Dictionary = {
   "basic.fullFrame.title":
     "Zeichnet das ungeschnittene Kamerabild auf. Rückfallweg, falls die zugeschnittene Aufnahme auf diesem Gerät nicht trägt – das Ausschnittrechteck steht weiterhin im Manifest.",
 
+  // ------------------------------------------------------ Einstellungs-Blatt
+  "settings.open": "Einstellungen",
+  "settings.title": "Einstellungen",
+  "settings.close": "Schließen",
+  "announce.mode": "Ansagen",
+  "announce.mode.title":
+    "Wie viel vor jedem Clip gesprochen wird. Die Töne markieren immer die Sekunden; die Anleitung steht immer auf dem Bildschirm.",
+  "announce.verbose": "Ausführlich",
+  "announce.brief": "Knapp",
+  "announce.tones": "Nur Töne",
+
+  // --------------------------------------------- Nur Video (Plain-Seite)
+  "app.plainTitle": "Nur Video",
+  "app.plainNote":
+    "Der Ton führt, aufgezeichnet wird der Kamerastream direkt. Keine Gesichtsanalyse – alles bleibt auf diesem Gerät.",
+  "nav.plain": "Nur Video",
+  "plain.framingHint":
+    "Bitte selbst einrichten: das ganze Gesicht im Bild, die Augen etwa im oberen Drittel. Es wird nichts nachgeführt und nichts geprüft.",
+  "plain.previewFps": "Vorschau {fps} fps",
+  "plain.sizeMax": "Maximum",
+  "plain.size.title":
+    "Lange Kante der Kamerabetriebsart. Kleinere Betriebsarten sind echte Videomodi und zeichnen flüssiger auf.",
+  "plain.savedSession": "{clips} Clips, {total} MB, {seconds} s Aufnahme",
+  "plainBundle.intro":
+    "Je Ausdruck ein Clip, akustisch angeleitet und direkt aus dem Kamerastream aufgezeichnet. Es lief keine Analyse, und es wurde nichts zugeschnitten.",
+  "plainBundle.clips": "je Position eine Videodatei, benannt 01_… bis 12_…, ungeschnitten",
+  "plainBundle.manifest":
+    "manifest.json – Kamera, Gerät und je Clip die Zeitfenster der Halten",
+
   // ------------------------------------ Geführtes Video: ZIP-Beschreibung
   "videoBundle.title": "Geführte Videoaufnahme",
   "videoBundle.intro":

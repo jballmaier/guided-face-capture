@@ -40,8 +40,17 @@ import {
   type PositionId,
   type PositionSpec,
 } from "../protocol/positions";
-import { announcementFor, buildPositionScript, CueRunner, type CueStep } from "./cues";
+import {
+  announcementFor,
+  buildPositionScript,
+  CueRunner,
+  loadAnnounceMode,
+  saveAnnounceMode,
+  type AnnounceMode,
+  type CueStep,
+} from "./cues";
 import { Voice, type VoiceInfo } from "./voice";
+import { initSettingsSheet } from "../ui/sheet";
 import {
   buildVideoManifest,
   clipFileName,
@@ -86,10 +95,11 @@ type BasicState = "idle" | "aligning" | "framing" | "running" | "done";
 /**
  * Feinzustand innerhalb einer laufenden Sitzung.
  *
- * `announcing` und `armed` zeichnen nicht auf - dort darf beliebig viel Zeit
- * vergehen. Erst `clip` schreibt eine Datei.
+ * Erst `clip` schreibt eine Datei. Eine eigene Ansage-Phase gibt es nicht
+ * mehr: der Aufnahmeknopf ist sofort scharf, die Ansage laeuft nebenher und
+ * wird vom Druck abgebrochen.
  */
-type RunPhase = "announcing" | "armed" | "clip";
+type RunPhase = "armed" | "clip";
 
 /** Was ein Knopfdruck der laufenden Folge mitteilen kann. */
 type RunSignal = "clip" | "repeat" | "abort";
@@ -147,6 +157,7 @@ const localeSelect = el<HTMLSelectElement>("locale-select");
 const cameraSelect = el<HTMLSelectElement>("camera-select");
 const sizeSelect = el<HTMLSelectElement>("size-select");
 const rateSelect = el<HTMLSelectElement>("rate-select");
+const announceSelect = el<HTMLSelectElement>("announce-select");
 const toggleLight = el<HTMLInputElement>("toggle-light");
 const toggleFullFrame = el<HTMLInputElement>("toggle-fullframe");
 const toggleAutoDiscard = el<HTMLInputElement>("toggle-autodiscard");
@@ -162,7 +173,11 @@ const btnAgain = el<HTMLButtonElement>("btn-again");
 const status = el<HTMLElement>("status");
 
 let state: BasicState = "idle";
-let phase: RunPhase = "announcing";
+let phase: RunPhase = "armed";
+let announceMode: AnnounceMode = loadAnnounceMode();
+/** Modus der laufenden Sitzung - eingefroren, damit das Manifest nicht luegt,
+ *  wenn der Regler nach der Sitzung umgestellt wird. */
+let sessionAnnounce: AnnounceMode = announceMode;
 let landmarker: Landmarker | null = null;
 let camera: ActiveCamera | null = null;
 let cameraProbe: CameraProbe | null = null;
@@ -284,6 +299,7 @@ function renderButtons(): void {
   cameraSelect.disabled = locked || cameraSelect.options.length < 2;
   sizeSelect.disabled = locked;
   rateSelect.disabled = locked;
+  announceSelect.disabled = locked;
   toggleFullFrame.disabled = locked;
 }
 
@@ -563,25 +579,16 @@ function waitForSignal(): Promise<RunSignal> {
   });
 }
 
-/**
- * Wartet auf eine Arbeit, laesst sich dabei aber von einem Knopfdruck
- * unterbrechen - sonst liesse sich eine lange Ansage nicht abbrechen.
- */
-async function raceSignal(work: Promise<unknown>): Promise<RunSignal | "done"> {
-  const outcome = await Promise.race([work.then(() => "done" as const), waitForSignal()]);
-  pending = null;
-  return outcome;
-}
-
 async function startGuidance(): Promise<void> {
   if (!recorder || !camera || !cropRect) return;
 
   // Ton synchron in der Geste freischalten - ein `await` davor verbraucht sie
   // auf iOS. Die Freigabe gilt danach fuer die ganze Sitzung.
   sessionLocale = getLocale();
+  sessionAnnounce = announceMode;
   voice = Voice.unlock(sessionLocale);
   voiceInfo = voice.info;
-  voiceMode = voiceInfo.available ? "speech+tones" : "tones";
+  voiceMode = voiceInfo.available && sessionAnnounce !== "tones" ? "speech+tones" : "tones";
 
   state = "running";
   abortedReason = null;
@@ -611,45 +618,44 @@ async function runSequence(only: PositionId | null): Promise<void> {
   while (i < order.length) {
     const spec = order[i]!;
 
-    // 1. Ansage. Laeuft ausserhalb der Aufnahme und darf so lang sein, wie die
-    //    Stimme braucht - sie landet in keiner Datei.
-    phase = "announcing";
-    renderButtons();
-    showPosition(spec, false);
-    renderHints([]);
-    setStatus(`${promptHeading(spec)}: ${positionLabel(spec)}`);
-
-    const announcement = announcementFor(spec, sessionLocale, { sayPattern: !patternSpoken });
-    const wallStart = performance.now();
-    voice?.tone("next");
-    const duringAnnounce = await raceSignal(voice?.speak(announcement.text) ?? Promise.resolve());
-    if (announcement.sayPattern) patternSpoken = true;
-    lastAnnouncement = {
-      text: announcement.text,
-      wallMs: Math.round(performance.now() - wallStart),
-    };
-
-    if (duringAnnounce === "abort") return;
-    if (duringAnnounce === "repeat") {
-      voice?.cancel();
-      i = repeatTarget(order, i);
-      continue;
-    }
-
-    // 2. Freigabe. Erst der Druck startet die Aufnahme.
+    // 1. Ansage und Freigabe zugleich: der Knopf ist sofort scharf, die
+    //    Ansage laeuft nebenher und landet in keiner Datei. Der Druck bricht
+    //    sie ab - niemand muss sie zu Ende hoeren.
     phase = "armed";
     renderButtons();
     showPosition(spec, true);
+    renderHints([]);
     setStatus(`${promptHeading(spec)}: ${positionLabel(spec)} - ${t("basic.armed")}`);
 
+    voice?.tone("next");
+    if (sessionAnnounce === "tones") {
+      lastAnnouncement = null;
+    } else {
+      const announcement = announcementFor(spec, sessionLocale, {
+        sayPattern: !patternSpoken,
+        brief: sessionAnnounce === "brief",
+      });
+      if (announcement.sayPattern) patternSpoken = true;
+      // Die Dauer traegt sich selbst nach, sobald die Sprache endet - auch
+      // beim Abbruch durch den Knopf, der `speak` aufloest.
+      const captured = { text: announcement.text, wallMs: 0 };
+      lastAnnouncement = captured;
+      const wallStart = performance.now();
+      void voice?.speak(announcement.text).then(() => {
+        captured.wallMs = Math.round(performance.now() - wallStart);
+      });
+    }
+
     const go = await waitForSignal();
+    // Was auch immer folgt - die Ansage endet, bevor etwas anderes beginnt.
+    voice?.cancel();
     if (go === "abort") return;
     if (go === "repeat") {
       i = repeatTarget(order, i);
       continue;
     }
 
-    // 3. Clip.
+    // 2. Clip.
     phase = "clip";
     renderButtons();
     const outcome = await recordClip(spec);
@@ -741,7 +747,7 @@ async function recordClip(spec: PositionSpec): Promise<"kept" | "discarded" | "a
 }
 
 function endSession(): void {
-  phase = "announcing";
+  phase = "armed";
   stopFrameWatch();
   prompt.hidden = true;
   endedAt = new Date().toISOString();
@@ -1014,7 +1020,7 @@ async function exportBundle(): Promise<void> {
             bytes: restStill.blob.size,
           }
         : null,
-      audio: { mode: voiceMode, speech: voiceInfo },
+      audio: { mode: voiceMode, speech: voiceInfo, announcements: sessionAnnounce },
       model: landmarker?.modelInfo ?? null,
     });
 
@@ -1115,6 +1121,18 @@ btnAgain.addEventListener("click", () => {
 });
 
 cameraSelect.addEventListener("change", () => void startCamera());
+
+initSettingsSheet(
+  el<HTMLButtonElement>("btn-settings"),
+  el<HTMLDialogElement>("settings"),
+  el<HTMLButtonElement>("btn-settings-close"),
+);
+
+announceSelect.value = announceMode;
+announceSelect.addEventListener("change", () => {
+  announceMode = announceSelect.value as AnnounceMode;
+  saveAnnounceMode(announceMode);
+});
 
 /**
  * Hell/dunkel folgt dem System, bis jemand den Schalter benutzt. Die helle
