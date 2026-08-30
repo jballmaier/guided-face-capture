@@ -12,6 +12,8 @@ export interface RecorderOptions {
   videoBitsPerSecond?: number;
   /** Interval at which chunks arrive. */
   timesliceMs?: number;
+  /** Container candidates in order of preference. Default: WebM first. */
+  mimeCandidates?: readonly string[];
 }
 
 export interface Recording {
@@ -29,6 +31,23 @@ const MIME_CANDIDATES = [
   "video/webm",
   "video/mp4;codecs=avc1",
   "video/mp4",
+] as const;
+
+/**
+ * MP4/H.264 zuerst - der Hardware-Encoder des Geraets.
+ *
+ * iOS beantwortet `isTypeSupported` fuer WebM seit 18.4 mit ja, kodiert VP9
+ * aber in Software: eine Sitzung auf einem iPhone lief damit auf 6 statt 30
+ * Bildern je Sekunde (gemessen 2026-08-30). Fuer Aufnahmen direkt vom
+ * Kamerastrom zaehlt der Encoder-Pfad, nicht das Containerformat - Seiten
+ * ohne eigene Zeichenkette waehlen deshalb diese Reihenfolge.
+ */
+export const MP4_FIRST_MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1",
+  "video/mp4",
+  "video/webm;codecs=vp9",
+  "video/webm;codecs=vp8",
+  "video/webm",
 ] as const;
 
 export function pickMimeType(): string | null {
@@ -100,7 +119,9 @@ export class SequenceRecorder {
 
   /** Chunks received so far. Still zero a few seconds in means the browser
    *  is not encoding this stream - better to stop than to hand over an
-   *  empty file at the end. */
+   *  empty file at the end. Only meaningful for WebM: the MP4 muxers of
+   *  Chromium and iOS ignore the timeslice and flush everything on stop
+   *  (measured 2026-08-30), so zero proves nothing there. */
   get chunkCount(): number {
     return this.chunks.length;
   }
@@ -108,17 +129,18 @@ export class SequenceRecorder {
   start(): void {
     if (this.recorder) throw new Error(t("error.recorderRunning"));
 
-    const { videoBitsPerSecond = 4_000_000, timesliceMs = 1000 } = this.options;
-    const preferred = pickMimeType();
-    if (!preferred) throw new Error(t("error.recorderUnsupported"));
+    const {
+      videoBitsPerSecond = 4_000_000,
+      timesliceMs = 1000,
+      mimeCandidates = MIME_CANDIDATES,
+    } = this.options;
+    if (typeof MediaRecorder === "undefined" || !mimeCandidates.some((m) => MediaRecorder.isTypeSupported(m)))
+      throw new Error(t("error.recorderUnsupported"));
 
-    // Walk the chain from the chosen candidate: isTypeSupported is not
-    // reliable on iOS, only start() is.
-    const startIndex = MIME_CANDIDATES.indexOf(preferred as (typeof MIME_CANDIDATES)[number]);
-    const queue = MIME_CANDIDATES.slice(Math.max(0, startIndex));
-
+    // Walk the whole chain: isTypeSupported is not reliable on iOS, only
+    // start() is - a candidate it accepts and then rejects falls through.
     let lastError: unknown = null;
-    for (const mimeType of queue) {
+    for (const mimeType of mimeCandidates) {
       if (!MediaRecorder.isTypeSupported(mimeType)) continue;
       try {
         const recorder = new MediaRecorder(this.stream, { mimeType, videoBitsPerSecond });

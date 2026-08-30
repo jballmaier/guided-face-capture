@@ -55,6 +55,7 @@ export default defineConfig(({ mode }) => ({
       input: {
         main: resolve(__dirname, "index.html"),
         basic: resolve(__dirname, "basic.html"),
+        plain: resolve(__dirname, "plain.html"),
       },
     },
   },

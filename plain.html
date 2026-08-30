@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Guided video</title>
+    <title>Video only</title>
   </head>
   <body>
     <div id="app">
       <header class="bar">
-        <h1><span data-i18n="app.basicTitle">Guided video</span> <span class="tag" data-i18n="app.tag">Prototype</span></h1>
-        <p class="note" data-i18n="app.basicNote"></p>
+        <h1><span data-i18n="app.plainTitle">Video only</span> <span class="tag" data-i18n="app.tag">Prototype</span></h1>
+        <p class="note" data-i18n="app.plainNote"></p>
 
         <div class="viewopts">
+          <a class="navlink" href="./basic.html" data-i18n="nav.basic">Guided video</a>
           <a class="navlink" href="./index.html" data-i18n="nav.full">Live analysis</a>
-          <a class="navlink" href="./plain.html" data-i18n="nav.plain">Video only</a>
           <label class="field checkbox" data-i18n-title="view.light.title">
             <input type="checkbox" id="toggle-light" />
             <span data-i18n="view.light">Screen light</span>
@@ -23,7 +23,6 @@
 
       <section class="stage solo" id="stage">
         <video id="preview" playsinline muted></video>
-        <canvas id="crop"></canvas>
 
         <div class="stage-empty" id="stage-empty">
           <p data-i18n="stage.empty">Camera not started yet.</p>
@@ -44,9 +43,7 @@
 
       <footer class="bar controls">
         <button id="btn-start" type="button" data-i18n="btn.start">Start camera</button>
-        <button id="btn-frame" type="button" hidden disabled data-i18n="btn.checkFraming">Check framing</button>
         <button id="btn-guide" type="button" hidden data-i18n="btn.guide">Start guidance</button>
-        <button id="btn-back" type="button" class="ghost" hidden data-i18n="btn.backToAlign">Back to alignment</button>
         <button id="btn-clip" type="button" hidden data-i18n="btn.run">Start recording</button>
         <button id="btn-repeat" type="button" class="ghost" hidden data-i18n="btn.repeatPlain">Repeat position</button>
         <button id="btn-abort" type="button" class="ghost" hidden data-i18n="btn.abort">Stop</button>
@@ -68,21 +65,14 @@
             <span data-i18n="field.camera">Camera</span>
             <select id="camera-select" disabled></select>
           </label>
-          <label class="field">
+          <label class="field" data-i18n-title="plain.size.title">
             <span data-i18n="basic.size">Video size</span>
             <select id="size-select">
               <option value="720">720</option>
               <option value="1080" selected>1080</option>
               <option value="1440">1440</option>
-              <option value="0" data-i18n="basic.sizeSource">Source</option>
-            </select>
-          </label>
-          <label class="field">
-            <span data-i18n="basic.rate">Bitrate</span>
-            <select id="rate-select">
-              <option value="1" selected data-i18n="basic.rateFormula">standard</option>
-              <option value="2">×2</option>
-              <option value="4">×4</option>
+              <option value="1920">1920</option>
+              <option value="0" data-i18n="plain.sizeMax">Maximum</option>
             </select>
           </label>
           <label class="field" data-i18n-title="announce.mode.title">
@@ -93,19 +83,11 @@
               <option value="tones" data-i18n="announce.tones">Tones only</option>
             </select>
           </label>
-          <label class="field checkbox" data-i18n-title="basic.autoDiscard.title">
-            <input type="checkbox" id="toggle-autodiscard" checked />
-            <span data-i18n="basic.autoDiscard">Discard on frame loss</span>
-          </label>
-          <label class="field checkbox" data-i18n-title="basic.fullFrame.title">
-            <input type="checkbox" id="toggle-fullframe" />
-            <span data-i18n="basic.fullFrame">Full frame</span>
-          </label>
         </div>
         <button id="btn-settings-close" type="button" class="ghost" data-i18n="settings.close">Close</button>
       </dialog>
     </div>
 
-    <script type="module" src="/src/basic/main.ts"></script>
+    <script type="module" src="/src/plain/main.ts"></script>
   </body>
 </html>

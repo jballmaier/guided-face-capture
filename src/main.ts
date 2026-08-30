@@ -55,6 +55,7 @@ import { AlignGate, collectIssues, RestBaseline, type RestSnapshot } from "./ali
 import { bitrateFor } from "./capture/bitrate";
 import { setWakeLock, watchVisibility } from "./ui/wakeLock";
 import { initTheme } from "./ui/theme";
+import { initSettingsSheet } from "./ui/sheet";
 import { estimateCropSavings } from "./export/crop";
 import { drawOverlay, highlightFor, type MeshMode } from "./ui/overlay";
 import { StripChart } from "./ui/graph";
@@ -1112,6 +1113,12 @@ initTheme(toggleLight, (light) => {
   view.light = light;
   updateWakeLock();
 });
+
+initSettingsSheet(
+  el<HTMLButtonElement>("btn-settings"),
+  el<HTMLDialogElement>("settings"),
+  el<HTMLButtonElement>("btn-settings-close"),
+);
 
 watchVisibility(wakeWanted);
 
