@@ -3,6 +3,7 @@ import {
   attachStream,
   closeCamera,
   listCameras,
+  MAX_CAPTURE_EDGE,
   openCamera,
   startFrameLoop,
   type ActiveCamera,
@@ -19,7 +20,7 @@ import {
   type PositionSpec,
 } from "../protocol/positions";
 import {
-  announcementFor,
+  beginAnnouncement,
   buildPositionScript,
   CueRunner,
   loadAnnounceMode,
@@ -75,6 +76,14 @@ type RunSignal = "clip" | "repeat" | "abort";
 
 const RECORD_FPS = 30;
 
+/**
+ * Ohne `requestVideoFrameCallback` laesst sich nicht zaehlen, was die Kamera
+ * liefert - der Rueckfall auf `requestAnimationFrame` zaehlt den
+ * Bildschirmtakt und meldete auf einer 6-fps-Kamera froehlich 60. Dann lieber
+ * gar keine Zahl.
+ */
+const CAN_COUNT_FRAMES = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+
 const el = <T extends HTMLElement>(id: string): T => {
   const node = document.getElementById(id);
   if (!node) throw new Error(`Element #${id} fehlt im HTML`);
@@ -104,6 +113,7 @@ const btnRepeat = el<HTMLButtonElement>("btn-repeat");
 const btnAbort = el<HTMLButtonElement>("btn-abort");
 const btnExport = el<HTMLButtonElement>("btn-export");
 const btnAgain = el<HTMLButtonElement>("btn-again");
+const btnSettings = el<HTMLButtonElement>("btn-settings");
 const status = el<HTMLElement>("status");
 
 let state: PlainState = "idle";
@@ -112,6 +122,29 @@ let announceMode: AnnounceMode = loadAnnounceMode();
 /** Modus der laufenden Sitzung - eingefroren, damit das Manifest nicht luegt,
  *  wenn der Regler nach der Sitzung umgestellt wird. */
 let sessionAnnounce: AnnounceMode = announceMode;
+
+/**
+ * Kamera-Provenienz der Sitzung, eingefroren beim Start der Anleitung.
+ *
+ * Das Manifest beschreibt die Kamera, die die Clips aufgenommen hat - nicht
+ * die, die beim Klick auf "Sichern" gerade offen ist. Ohne das Einfrieren
+ * schrieb ein fehlgeschlagener Kamerawechsel nach der Sitzung einen leeren
+ * Kamerablock und die nie benutzte neue Groesse in die Datei.
+ */
+interface SessionCamera {
+  settings: MediaTrackSettings;
+  probe: CameraProbe | null;
+  label: string;
+  isFrontFacing: boolean;
+  frameRateFloor: number | null;
+  maxEdge: number;
+}
+let sessionCamera: SessionCamera | null = null;
+/** Lange Kante, mit der die offene Kamera verhandelt wurde. */
+let openedMaxEdge = 0;
+/** Gegen ueberlappende Oeffnungen - der Verlierer liesse sonst einen nie
+ *  gestoppten Kamerastrom zurueck. */
+let openingCamera = false;
 let camera: ActiveCamera | null = null;
 let cameraProbe: CameraProbe | null = null;
 let lightMode = false;
@@ -127,6 +160,8 @@ let sessionBitrate = 0;
 let startedAt = "";
 let endedAt = "";
 let sessionWallStart = 0;
+/** Beim Sitzungsende eingefroren - nicht erst beim Klick auf "Sichern". */
+let sessionWallMs = 0;
 let abortedReason: string | null = null;
 
 const clips = new Map<PositionId, PlainClipResult>();
@@ -159,7 +194,9 @@ function reportError(err: unknown): void {
 
 function renderButtons(): void {
   const running = state === "running";
-  btnStart.hidden = running;
+  // Im Fertig-Zustand keinen Kamerawechsel anbieten: er wuerde die Sitzung
+  // beenden, bevor sie gesichert ist. "Neue Aufnahme" ist der Weg.
+  btnStart.hidden = running || state === "done";
   btnGuide.hidden = state !== "ready";
   btnClip.hidden = !running || phase !== "armed";
   btnRepeat.hidden =
@@ -181,6 +218,9 @@ function renderButtons(): void {
   cameraSelect.disabled = locked || cameraSelect.options.length < 2;
   sizeSelect.disabled = locked;
   announceSelect.disabled = locked;
+  // Das Blatt ist modal und legte sich sonst mitten in der Aufnahme ueber
+  // Anweisung und Stopp-Knopf.
+  btnSettings.disabled = locked;
 }
 
 function renderHints(issues: string[], ok?: string): void {
@@ -208,15 +248,14 @@ function promptHeading(spec: PositionSpec, extra?: string): string {
   return extra ? `${base} - ${extra}` : base;
 }
 
-function showPosition(spec: PositionSpec, armed: boolean): void {
+/** Bereitschaftsanzeige - der Knopf ist scharf, hier laeuft keine Aufnahme. */
+function showPosition(spec: PositionSpec): void {
   prompt.hidden = false;
   progressFill.style.width = "0%";
   progressFill.classList.remove("ready");
   promptStep.textContent = promptHeading(spec);
   promptTitle.textContent = positionLabel(spec);
-  promptInstruction.textContent = armed
-    ? `${positionInstruction(spec)} — ${t("basic.armed")}`
-    : positionInstruction(spec);
+  promptInstruction.textContent = `${positionInstruction(spec)} — ${t("basic.armed")}`;
 }
 
 function showStep(step: CueStep, at: number, total: number): void {
@@ -238,16 +277,21 @@ function showStep(step: CueStep, at: number, total: number): void {
 // ------------------------------------------------------------------- Kamera
 
 async function startCamera(): Promise<void> {
+  // Ein zweiter Aufruf waehrend des Oeffnens verloere den Strom des ersten -
+  // niemand stoppte ihn je, die Kamera-LED bliebe an.
+  if (openingCamera) return;
+  openingCamera = true;
   btnStart.disabled = true;
   try {
     setStatus(t("status.openingCamera"));
     releaseCamera();
     const deviceId = cameraSelect.value || undefined;
+    openedMaxEdge = Number.parseInt(sizeSelect.value, 10);
     // Bildrate als Bedingung, Aufloesung als Wunsch - sonst waehlt der Browser
     // die Fotobetriebsart, und die liefert keine dreissig Bilder je Sekunde.
     camera = await openCamera({
       ...(deviceId ? { deviceId } : {}),
-      maxEdge: Number.parseInt(sizeSelect.value, 10),
+      maxEdge: openedMaxEdge,
       minFrameRate: RECORD_FPS,
     });
     await attachStream(video, camera.stream);
@@ -265,9 +309,17 @@ async function startCamera(): Promise<void> {
     enterReady();
   } catch (err) {
     reportError(err);
+    // Ohne Kamera ist nichts bereit: zurueck auf Anfang statt einer toten
+    // Buehne mit stummem Anleitung-Knopf.
+    if (!camera) {
+      state = "idle";
+      stageEmpty.hidden = false;
+      renderButtons();
+    }
   } finally {
+    openingCamera = false;
     btnStart.disabled = false;
-    btnStart.textContent = t("btn.switch");
+    btnStart.textContent = camera ? t("btn.switch") : t("btn.start");
   }
 }
 
@@ -337,9 +389,13 @@ async function startGuidance(): Promise<void> {
   if (!camera) return;
 
   // Ton synchron in der Geste freischalten - ein `await` davor verbraucht sie
-  // auf iOS. Die Freigabe gilt danach fuer die ganze Sitzung.
+  // auf iOS. Die Freigabe gilt danach fuer die ganze Sitzung; der alte
+  // Klangkontext wird geschlossen, sonst sammeln sich mit jeder Sitzung
+  // AudioContexte an, bis der Browser keinen mehr hergibt und die Toene
+  // stumm bleiben.
   sessionLocale = getLocale();
   sessionAnnounce = announceMode;
+  voice?.close();
   voice = Voice.unlock(sessionLocale);
   voiceInfo = voice.info;
   voiceMode = voiceInfo.available && sessionAnnounce !== "tones" ? "speech+tones" : "tones";
@@ -350,6 +406,16 @@ async function startGuidance(): Promise<void> {
     settings.height ?? 720,
     settings.frameRate ?? RECORD_FPS,
   );
+  sessionCamera = {
+    settings,
+    probe: cameraProbe,
+    label: camera.label,
+    isFrontFacing: camera.isFrontFacing,
+    frameRateFloor: camera.frameRateFloor,
+    // Die tatsaechlich verhandelte Obergrenze - "Maximum" steht im Regler als
+    // 0, geoeffnet wird aber mit der Vorgabe der Kameraschicht.
+    maxEdge: openedMaxEdge > 0 ? openedMaxEdge : MAX_CAPTURE_EDGE,
+  };
 
   state = "running";
   abortedReason = null;
@@ -385,31 +451,21 @@ async function runSequence(only: PositionId | null): Promise<void> {
     //    sie ab - niemand muss sie zu Ende hoeren.
     phase = "armed";
     renderButtons();
-    showPosition(spec, true);
+    showPosition(spec);
+    renderHints([]);
     setStatus(`${promptHeading(spec)}: ${positionLabel(spec)} - ${t("basic.armed")}`);
 
     voice?.tone("next");
-    if (sessionAnnounce === "tones") {
-      lastAnnouncement = null;
-    } else {
-      const announcement = announcementFor(spec, sessionLocale, {
-        sayPattern: !patternSpoken,
-        brief: sessionAnnounce === "brief",
-      });
-      if (announcement.sayPattern) patternSpoken = true;
-      // Die Dauer traegt sich selbst nach, sobald die Sprache endet - auch
-      // beim Abbruch durch den Knopf, der `speak` aufloest.
-      const captured = { text: announcement.text, wallMs: 0 };
-      lastAnnouncement = captured;
-      const wallStart = performance.now();
-      void voice?.speak(announcement.text).then(() => {
-        captured.wallMs = Math.round(performance.now() - wallStart);
-      });
-    }
+    const announce = beginAnnouncement(voice, spec, sessionLocale, {
+      mode: sessionAnnounce,
+      sayPattern: !patternSpoken,
+    });
+    if (announce.spokePattern) patternSpoken = true;
+    lastAnnouncement = announce.record;
 
     const go = await waitForSignal();
     // Was auch immer folgt - die Ansage endet, bevor etwas anderes beginnt.
-    voice?.cancel();
+    announce.stop();
     if (go === "abort") return;
     if (go === "repeat") {
       i = repeatTarget(order, i);
@@ -444,7 +500,12 @@ function repeatTarget(order: readonly PositionSpec[], current: number): number {
  * Kamera oder der Encoder gebremst hat.
  */
 async function recordClip(spec: PositionSpec): Promise<"kept" | "discarded" | "abort"> {
-  if (!camera || !voice) return "abort";
+  if (!camera || !voice) {
+    // Ohne Kamera gibt es nichts aufzunehmen - das muss als Abbruch sichtbar
+    // werden, nicht als still gelungene Sitzung.
+    abortedReason ??= "no-camera";
+    return "abort";
+  }
 
   const attempt = (attemptsOf.get(spec.id) ?? 0) + 1;
   attemptsOf.set(spec.id, attempt);
@@ -458,78 +519,107 @@ async function recordClip(spec: PositionSpec): Promise<"kept" | "discarded" | "a
     mimeCandidates: MP4_FIRST_MIME_CANDIDATES,
   });
   activeRecorder = recorder;
-  recorder.start();
 
-  let previewFrames = 0;
-  let statusShownAt = 0;
-  stopClipFrames = startFrameLoop(video, (nowMs) => {
-    previewFrames += 1;
-    if (nowMs - statusShownAt > 500 && recorder.elapsedMs > 1000) {
-      statusShownAt = nowMs;
-      const fps = (previewFrames * 1000) / recorder.elapsedMs;
-      setStatus(`${t("basic.recording")} · ${t("plain.previewFps", { fps: fps.toFixed(0) })}`);
+  try {
+    recorder.start();
+
+    let previewFrames: number | null = CAN_COUNT_FRAMES ? 0 : null;
+    if (CAN_COUNT_FRAMES) {
+      let statusShownAt = 0;
+      stopClipFrames = startFrameLoop(video, (nowMs) => {
+        previewFrames = (previewFrames ?? 0) + 1;
+        if (nowMs - statusShownAt > 500 && recorder.elapsedMs > 1000) {
+          statusShownAt = nowMs;
+          const fps = ((previewFrames ?? 0) * 1000) / recorder.elapsedMs;
+          setStatus(`${t("basic.recording")} · ${t("plain.previewFps", { fps: fps.toFixed(0) })}`);
+        }
+      });
+    } else {
+      setStatus(t("basic.recording"));
     }
-  });
 
-  runner = new CueRunner(buildPositionScript(spec), {
-    voice,
-    clock: () => recorder.elapsedMs,
-    onStep: (step, at, total) => showStep(step, at, total),
-  });
+    runner = new CueRunner(buildPositionScript(spec), {
+      voice,
+      clock: () => recorder.elapsedMs,
+      onStep: (step, at, total) => showStep(step, at, total),
+    });
 
-  const events = await runner.run();
-  stopClipFrames();
-  stopClipFrames = null;
+    const events = await runner.run();
 
-  const recording = await recorder.stop();
-  activeRecorder = null;
+    // Der Verwerfen-Wunsch zaehlt nur bis zum Ende des Taktes: verschwindet
+    // die Seite erst waehrend des Stopps, ist der Clip laengst vollstaendig
+    // und wird behalten.
+    const discarded = discardRequested;
 
-  // Erst nach dem Stop pruefbar: die MP4-Muxer von Chromium und iOS ignorieren
-  // die Zeitscheibe und liefern alle Daten in einem Stueck beim Stop (gemessen
-  // 2026-08-30) - ein Watchdog auf Zwischenbloecke wie auf der gefuehrten
-  // Seite braeche hier gesunde Aufnahmen ab.
-  if (recording.bytes === 0 && abortedReason === null && discardRequested === null) {
-    abortedReason = "no-video-data";
+    if (discarded !== null && abortedReason === null) {
+      // Verworfenes gar nicht erst zusammensetzen - der Verwurf kommt vom
+      // Ausblenden der Seite, also genau dann, wenn der Speicher knapp wird.
+      const durationMs = recorder.elapsedMs;
+      recorder.discard();
+      attemptLog.push({
+        id: spec.id,
+        attempt,
+        kept: false,
+        discardReason: discarded,
+        startedAtEpochMs: clipEpochMs,
+        durationMs,
+      });
+      renderHints([t("basic.discarded")]);
+      voice.tone("warn");
+      return "discarded";
+    }
+
+    const recording = await recorder.stop();
+
+    // Erst nach dem Stop pruefbar: die MP4-Muxer von Chromium und iOS
+    // ignorieren die Zeitscheibe und liefern alle Daten in einem Stueck beim
+    // Stop (gemessen 2026-08-30) - ein Watchdog auf Zwischenbloecke braeche
+    // hier gesunde Aufnahmen ab.
+    if (recording.bytes === 0 && abortedReason === null) {
+      abortedReason = "no-video-data";
+    }
+
+    const aborted = abortedReason !== null;
+    attemptLog.push({
+      id: spec.id,
+      attempt,
+      kept: !aborted,
+      discardReason: aborted ? abortedReason : null,
+      startedAtEpochMs: clipEpochMs,
+      durationMs: recording.durationMs,
+    });
+
+    if (aborted) return "abort";
+
+    clips.set(spec.id, {
+      spec,
+      recording,
+      events,
+      previewFrames,
+      startedAt: clipStartedAt,
+      startedAtEpochMs: clipEpochMs,
+      attempt,
+      discardedAttempts: attempt - 1,
+      announcement: lastAnnouncement,
+    });
+    return "kept";
+  } finally {
+    // Auch auf dem Fehlerweg: Zaehlschleife beenden und nichts weiterlaufen
+    // lassen. Nach einem regulaeren Stop ist `discard()` ein Leerlauf.
+    stopClipFrames?.();
+    stopClipFrames = null;
+    if (activeRecorder === recorder) {
+      activeRecorder = null;
+      recorder.discard();
+    }
   }
-
-  const discarded = discardRequested;
-  const aborted = abortedReason !== null;
-
-  attemptLog.push({
-    id: spec.id,
-    attempt,
-    kept: !discarded && !aborted,
-    discardReason: discarded ?? (aborted ? abortedReason : null),
-    startedAtEpochMs: clipEpochMs,
-    durationMs: recording.durationMs,
-  });
-
-  if (aborted) return "abort";
-
-  if (discarded) {
-    renderHints([t("basic.discarded")]);
-    voice.tone("warn");
-    return "discarded";
-  }
-
-  clips.set(spec.id, {
-    spec,
-    recording,
-    events,
-    previewFrames,
-    startedAt: clipStartedAt,
-    startedAtEpochMs: clipEpochMs,
-    attempt,
-    discardedAttempts: attempt - 1,
-    announcement: lastAnnouncement,
-  });
-  return "kept";
 }
 
 function endSession(): void {
   phase = "armed";
   prompt.hidden = true;
   endedAt = new Date().toISOString();
+  sessionWallMs = performance.now() - sessionWallStart;
   state = "done";
   renderButtons();
   void setWakeLock(wakeWanted());
@@ -570,33 +660,39 @@ async function exportBundle(): Promise<void> {
   if (clips.size === 0 || exporting) return;
   exporting = true;
   btnExport.disabled = true;
+  // Waehrend des Packens nichts wegraeumen lassen: "Neue Aufnahme" mitten im
+  // Export leerte die Clip-Liste unter dem laufenden Durchlauf.
+  btnAgain.disabled = true;
+  btnRepeat.disabled = true;
   try {
     setStatus(t("status.packing"));
+    // Eingefrorener Stand der Sitzung - weder ein spaeterer Kamerawechsel
+    // noch ein Klick waehrend des Packens veraendert, was ins Paket kommt.
+    const snapshot = new Map(clips);
     const manifest = buildPlainManifest({
       locale: sessionLocale,
       startedAt,
       endedAt,
-      wallMs: performance.now() - sessionWallStart,
+      wallMs: sessionWallMs,
       abortedReason,
-      clips,
+      clips: snapshot,
       attempts: attemptLog,
       requestedFps: RECORD_FPS,
       videoBitsPerSecond: sessionBitrate,
-      maxEdge: Number.parseInt(sizeSelect.value, 10),
-      cameraSettings: camera?.track.getSettings() ?? {},
-      cameraProbe,
-      frameRateFloor: camera?.frameRateFloor ?? null,
-      cameraLabel: camera?.label ?? "Kamera",
-      isFrontFacing: camera?.isFrontFacing ?? false,
+      maxEdge: sessionCamera?.maxEdge ?? 0,
+      cameraSettings: sessionCamera?.settings ?? {},
+      cameraProbe: sessionCamera?.probe ?? null,
+      frameRateFloor: sessionCamera?.frameRateFloor ?? null,
+      cameraLabel: sessionCamera?.label ?? "Kamera",
+      isFrontFacing: sessionCamera?.isFrontFacing ?? false,
       audio: { mode: voiceMode, speech: voiceInfo, announcements: sessionAnnounce },
     });
 
-    const files: Record<string, Uint8Array | string> = {};
-    // Nacheinander lesen: beim Packen liegen die Daten ohnehin ein zweites Mal
-    // im Speicher, also nicht auch noch alle Blobs gleichzeitig kopieren.
-    for (const clip of clips.values()) {
-      const name = clipFileName(clip.spec, clip.recording.mimeType);
-      files[name] = new Uint8Array(await clip.recording.blob.arrayBuffer());
+    const files: Record<string, Uint8Array | string | Blob> = {};
+    // Die Blobs wandern unkopiert ins ZIP - siehe zipStore.ts. Vorher lagen
+    // Rohdaten, Archiv und Kopie gleichzeitig im Speicher.
+    for (const clip of snapshot.values()) {
+      files[clipFileName(clip.spec, clip.recording.mimeType)] = clip.recording.blob;
     }
     files["manifest.json"] = JSON.stringify(manifest, null, 2);
     files["README.txt"] = readme();
@@ -607,7 +703,7 @@ async function exportBundle(): Promise<void> {
 
     setStatus(
       t("basic.savedZip", {
-        clips: clips.size,
+        clips: snapshot.size,
         total: (blob.size / 1024 / 1024).toFixed(1),
       }),
     );
@@ -616,13 +712,15 @@ async function exportBundle(): Promise<void> {
   } finally {
     exporting = false;
     btnExport.disabled = false;
+    btnAgain.disabled = false;
+    btnRepeat.disabled = false;
   }
 }
 
 function readme(): string {
   const l = sessionLocale;
   return [
-    tIn(l, "videoBundle.title"),
+    tIn(l, "plainBundle.title"),
     "===========================================",
     "",
     tIn(l, "plainBundle.intro"),
@@ -656,7 +754,8 @@ btnRepeat.addEventListener("click", () => {
     return;
   }
   // Nach der Sitzung: die eine Position nachholen, danach wieder abschliessen.
-  if (state === "done" && lastRecorded) {
+  // Nur mit Kamera - sonst endete der Versuch als stiller Leerlauf.
+  if (state === "done" && lastRecorded && camera) {
     const target = lastRecorded;
     state = "running";
     abortedReason = null;
@@ -675,11 +774,23 @@ btnAgain.addEventListener("click", () => {
   attemptsOf.clear();
   attemptLog = [];
   lastRecorded = null;
-  enterReady();
+  // Eine im Fertig-Zustand geaenderte Kamera- oder Groessenwahl greift jetzt -
+  // waehrend die Clips noch ungesichert waren, blieb sie absichtlich liegen.
+  const wantedEdge = Number.parseInt(sizeSelect.value, 10);
+  const activeDevice = camera?.settings.deviceId;
+  if (
+    camera &&
+    (wantedEdge !== openedMaxEdge ||
+      (cameraSelect.value !== "" && activeDevice !== undefined && cameraSelect.value !== activeDevice))
+  ) {
+    void startCamera();
+  } else {
+    enterReady();
+  }
 });
 
 initSettingsSheet(
-  el<HTMLButtonElement>("btn-settings"),
+  btnSettings,
   el<HTMLDialogElement>("settings"),
   el<HTMLButtonElement>("btn-settings-close"),
 );
@@ -690,11 +801,14 @@ announceSelect.addEventListener("change", () => {
   saveAnnounceMode(announceMode);
 });
 
-cameraSelect.addEventListener("change", () => void startCamera());
+// Beide Wahlen greifen nur im Bereit-Zustand sofort. Im Fertig-Zustand wuerde
+// ein Neuoeffnen die Sitzung beenden, bevor sie gesichert ist - dort merkt
+// sich der Regler die Wahl, und "Neue Aufnahme" wendet sie an.
+cameraSelect.addEventListener("change", () => {
+  if (state === "ready") void startCamera();
+});
 sizeSelect.addEventListener("change", () => {
-  // Die Groesse ist hier die Kamerabetriebsart - sie wirkt erst mit dem
-  // naechsten Oeffnen. Solange keine Sitzung laeuft, sofort neu verhandeln.
-  if (camera && state !== "running") void startCamera();
+  if (state === "ready") void startCamera();
 });
 
 initTheme(toggleLight, (light) => {

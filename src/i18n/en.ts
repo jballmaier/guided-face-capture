@@ -298,6 +298,7 @@ export const en = {
   "plain.size.title":
     "Long edge of the camera mode. Smaller modes are true video modes and record more smoothly.",
   "plain.savedSession": "{clips} clips, {total} MB, {seconds} s recorded",
+  "plainBundle.title": "Video-only capture",
   "plainBundle.intro":
     "One clip per expression, cued acoustically and recorded straight from the camera stream. No analysis ran and no crop was applied.",
   "plainBundle.clips": "one video file per position, named 01_... to 12_..., uncropped",

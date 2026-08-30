@@ -296,6 +296,7 @@ export const de: Dictionary = {
   "plain.size.title":
     "Lange Kante der Kamerabetriebsart. Kleinere Betriebsarten sind echte Videomodi und zeichnen flüssiger auf.",
   "plain.savedSession": "{clips} Clips, {total} MB, {seconds} s Aufnahme",
+  "plainBundle.title": "Nur-Video-Aufnahme",
   "plainBundle.intro":
     "Je Ausdruck ein Clip, akustisch angeleitet und direkt aus dem Kamerastream aufgezeichnet. Es lief keine Analyse, und es wurde nichts zugeschnitten.",
   "plainBundle.clips": "je Position eine Videodatei, benannt 01_… bis 12_…, ungeschnitten",

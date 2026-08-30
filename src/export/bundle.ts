@@ -1,4 +1,4 @@
-import { zip, strToU8 } from "fflate";
+import { packStoredZip } from "./zipStore";
 import { fileExtensionFor } from "../capture/recorder";
 import { positionSlug } from "../protocol/positions";
 import type { SessionResult } from "../session/session";
@@ -19,33 +19,23 @@ export interface BundleInput {
 /**
  * Packs a set of files into a ZIP. Text is encoded as UTF-8.
  *
- * Stored, not deflated (see the header): the caller decides what goes in, so
- * both pages share one packer instead of two.
+ * Blobs go in as blobs and are never copied into the JS heap - see
+ * `zipStore.ts`. All pages share this one packer.
  */
-export async function packZip(files: Record<string, Uint8Array | string>): Promise<Blob> {
-  const store = { level: 0 } as const;
-  const entries: Record<string, [Uint8Array, { level: 0 }]> = {};
-  for (const [name, data] of Object.entries(files)) {
-    entries[name] = [typeof data === "string" ? strToU8(data) : data, store];
-  }
-
-  const packed = await new Promise<Uint8Array>((resolve, reject) => {
-    zip(entries, { level: 0 }, (err, data) => (err ? reject(err) : resolve(data)));
-  });
-
-  return new Blob([packed as BlobPart], { type: "application/zip" });
+export async function packZip(
+  files: Record<string, Uint8Array | string | Blob>,
+): Promise<Blob> {
+  return packStoredZip(files);
 }
 
 export async function buildBundle({ session, manifest }: BundleInput): Promise<Blob> {
-  const files: Record<string, Uint8Array | string> = {};
+  const files: Record<string, Uint8Array | string | Blob> = {};
 
-  files[`video.${fileExtensionFor(session.recording.mimeType)}`] = new Uint8Array(
-    await session.recording.blob.arrayBuffer(),
-  );
+  files[`video.${fileExtensionFor(session.recording.mimeType)}`] = session.recording.blob;
 
   for (const result of session.results) {
     if (!result.still) continue;
-    files[`${positionSlug(result.spec)}.jpg`] = new Uint8Array(await result.still.blob.arrayBuffer());
+    files[`${positionSlug(result.spec)}.jpg`] = result.still.blob;
   }
 
   files["manifest.json"] = JSON.stringify(manifest, null, 2);

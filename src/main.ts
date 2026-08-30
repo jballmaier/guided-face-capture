@@ -140,6 +140,7 @@ const graphCaption = el<HTMLElement>("graph-caption");
 const tabDebug = el<HTMLElement>("tab-debug");
 const btnStart = el<HTMLButtonElement>("btn-start");
 const btnRun = el<HTMLButtonElement>("btn-run");
+const btnSettings = el<HTMLButtonElement>("btn-settings");
 const btnShutter = el<HTMLButtonElement>("btn-shutter");
 const btnNext = el<HTMLButtonElement>("btn-next");
 const btnSkip = el<HTMLButtonElement>("btn-skip");
@@ -170,6 +171,8 @@ let stream: MediaStream | null = null;
 let session: CaptureSession | null = null;
 let sessionResult: SessionResult | null = null;
 let state: AppState = "idle";
+/** Gegen ueberlappende Kameraoeffnungen - siehe startCamera. */
+let openingCamera = false;
 let stopLoop: (() => void) | null = null;
 let lastTimestamp = -1;
 let lastSample: DetectorSample | null = null;
@@ -200,6 +203,9 @@ let devMode = false;
 
 function updateFlowButtons(): void {
   btnNext.hidden = state !== "running" || (autoAdvance && !devMode);
+  // Das Blatt ist modal und legte sich sonst mitten in der Aufnahme ueber
+  // Buehne und Ausloeser.
+  btnSettings.disabled = state === "running";
 }
 
 const fps = { last: 0, value: 0 };
@@ -248,6 +254,10 @@ async function ensureLandmarker(): Promise<Landmarker> {
 }
 
 async function startCamera(): Promise<void> {
+  // Ein zweiter Aufruf waehrend des Oeffnens verloere den Strom des ersten -
+  // niemand stoppte ihn je, die Kamera-LED bliebe an.
+  if (openingCamera) return;
+  openingCamera = true;
   btnStart.disabled = true;
   try {
     await ensureLandmarker();
@@ -288,6 +298,7 @@ async function startCamera(): Promise<void> {
   } catch (err) {
     reportError(err);
   } finally {
+    openingCamera = false;
     btnStart.disabled = false;
     btnStart.textContent = t("btn.switch");
   }
@@ -1080,7 +1091,10 @@ toggleDev.addEventListener("change", () => {
   updateFlowButtons();
 });
 
-cameraSelect.addEventListener("change", () => void startCamera());
+// Waehrend einer laufenden Folge nicht neu oeffnen - das risse die Sitzung ab.
+cameraSelect.addEventListener("change", () => {
+  if (state !== "running") void startCamera();
+});
 fileInput.addEventListener("change", () => {
   const file = fileInput.files?.[0];
   if (file) void useFile(file);
@@ -1115,7 +1129,7 @@ initTheme(toggleLight, (light) => {
 });
 
 initSettingsSheet(
-  el<HTMLButtonElement>("btn-settings"),
+  btnSettings,
   el<HTMLDialogElement>("settings"),
   el<HTMLButtonElement>("btn-settings-close"),
 );

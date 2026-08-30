@@ -87,6 +87,11 @@ export class CroppedRecorder {
     return this.recorder?.isPaused ?? false;
   }
 
+  /** Ausgehandelter Container der laufenden Aufzeichnung, leer davor. */
+  get mimeType(): string {
+    return this.recorder?.mimeType ?? "";
+  }
+
   /** Bisher aufgezeichnete Bilder - gegen `elapsedMs` die tatsaechliche Rate. */
   get drawnFrames(): number {
     return this.drawn;
@@ -104,8 +109,8 @@ export class CroppedRecorder {
     this.recorder?.resume();
   }
 
-  /** Chunks, die der Recorder bisher bekommen hat. Nach zwei Sekunden noch
-   *  null heisst, dass diese Kette auf dem Geraet nicht traegt. */
+  /** Chunks, die der Recorder bisher bekommen hat. Nur fuer WebM aussagekraeftig:
+   *  die MP4-Muxer liefern alles erst beim Stop (siehe recorder.ts). */
   get chunkCount(): number {
     return this.recorder?.chunkCount ?? 0;
   }

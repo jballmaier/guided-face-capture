@@ -152,6 +152,60 @@ export function announcementFor(
   return { text, sayPattern };
 }
 
+export interface RunningAnnouncement {
+  /** Geht so ins Manifest; null, wenn nichts gesprochen wird. */
+  record: { text: string; wallMs: number } | null;
+  /** Wurde das Wiederholungsmuster mitgesprochen? */
+  spokePattern: boolean;
+  /** Bricht die Ansage ab und schliesst die Messung. */
+  stop: () => void;
+}
+
+/**
+ * Startet die Ansage nebenlaeufig und misst ihre Dauer selbst.
+ *
+ * Beide Seiten teilen sich diesen Block, damit `wallMs` ueberall dasselbe
+ * bedeutet: die hoerbare Spanne. `stop()` haelt die Uhr an, statt auf die
+ * Engine zu warten - eine abgebrochene Aeusserung meldet ihr Ende nicht
+ * verlaesslich, und der Wachhund in `voice.ts` haette sonst 2,5 Sekunden fuer
+ * eine Ansage notiert, die nach 200 Millisekunden verstummte. Im Toene-Modus
+ * bleibt `stop()` leer: es laeuft keine Sprache, und ein `cancel()` traefe nur
+ * die Warmlauf-Aeusserung einer gerade anlaufenden Engine.
+ */
+export function beginAnnouncement(
+  voice: Voice | null,
+  spec: PositionSpec,
+  locale: Locale,
+  options: { mode: AnnounceMode; sayPattern: boolean },
+): RunningAnnouncement {
+  if (options.mode === "tones" || !voice) {
+    return { record: null, spokePattern: false, stop: () => undefined };
+  }
+
+  const announcement = announcementFor(spec, locale, {
+    sayPattern: options.sayPattern,
+    brief: options.mode === "brief",
+  });
+  const record = { text: announcement.text, wallMs: 0 };
+  const startedAt = performance.now();
+  let settled = false;
+  const settle = (): void => {
+    if (settled) return;
+    settled = true;
+    record.wallMs = Math.round(performance.now() - startedAt);
+  };
+
+  void voice.speak(announcement.text).then(settle);
+  return {
+    record,
+    spokePattern: announcement.sayPattern,
+    stop: () => {
+      voice.cancel();
+      settle();
+    },
+  };
+}
+
 export interface CueRunnerDeps {
   voice: Voice;
   /** Zeitachse dieses Clips - `elapsedMs` des laufenden Recorders. */

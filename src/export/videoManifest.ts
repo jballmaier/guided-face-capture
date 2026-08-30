@@ -127,7 +127,7 @@ export interface VideoManifestInput {
   rest: RestSnapshot | null;
   faceBox: FaceBoxSnapshot | null;
   restStill: { file: string; width: number; height: number; bytes: number } | null;
-  audio: { mode: string; speech: VoiceInfo; announcements: string };
+  audio: AudioBlockInput;
   model: ModelInfo | null;
 }
 
@@ -142,6 +142,125 @@ export function clipFileName(spec: PositionSpec, mimeType: string): string {
   return `${positionSlug(spec)}.${fileExtensionFor(mimeType)}`;
 }
 
+/*
+ * Die folgenden Bloecke teilen sich beide Clip-Manifeste. Geteilt statt
+ * kopiert, weil sie einen Vertrag beschreiben: aendert sich das Protokoll
+ * oder die Version, muessen beide Profile dieselbe Beschreibung tragen -
+ * eine Kopie driftet, und die Auswertung liest zwei Buendel mit derselben
+ * Versionsnummer unter verschiedenen Annahmen.
+ */
+
+export function protocolBlock(): Record<string, unknown> {
+  return {
+    id: "expression-set-12",
+    variant: "guided-clips-3x1s",
+    description:
+      "Twelve standardised facial expressions, one clip per position: a second at rest, three one-second holds, a second at rest. Cued acoustically; the announcement runs before the clip and is in no file.",
+    repetitions: REPETITIONS,
+    holdMs: HOLD_MS,
+    releaseMs: RELEASE_MS,
+    neutralHoldMs: NEUTRAL_HOLD_MS,
+    leadMs: LEAD_MS,
+    tailMs: TAIL_MS,
+  };
+}
+
+export const TIMEBASE_BLOCK = {
+  origin: "clip-start",
+  clock: "performance.now",
+  unit: "ms",
+  note: "Every clip has its own zero. All times under positions[] are relative to that clip; positions[].timebase carries its wall-clock anchor. Cue times are measured, not planned - plannedMs states what was asked for.",
+} as const;
+
+export interface SessionBlockInput {
+  locale: Locale;
+  startedAt: string;
+  endedAt: string;
+  wallMs: number;
+  recordedMs: number;
+  clipsRecorded: number;
+  attempts: readonly ClipAttempt[];
+  abortedReason: string | null;
+}
+
+export function sessionBlock(input: SessionBlockInput): Record<string, unknown> {
+  return {
+    locale: input.locale,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
+    /** Ganze Sitzung, mit Ansagen, Wartezeiten und verworfenen Versuchen. */
+    wallMs: Math.round(input.wallMs),
+    /** Summe der behaltenen Clips - so viel Video liegt im Paket. */
+    recordedMs: Math.round(input.recordedMs),
+    clipsPlanned: POSITIONS.length,
+    clipsRecorded: input.clipsRecorded,
+    attempts: input.attempts.length,
+    abortedReason: input.abortedReason,
+    /** Tatsaechliche Reihenfolge, verworfene Versuche eingeschlossen. */
+    clipOrder: input.attempts.map((a) => ({
+      id: a.id,
+      attempt: a.attempt,
+      kept: a.kept,
+      discardReason: a.discardReason,
+      startedAtEpochMs: a.startedAtEpochMs,
+      durationMs: Math.round(a.durationMs),
+    })),
+  };
+}
+
+export interface AudioBlockInput {
+  mode: string;
+  speech: VoiceInfo;
+  announcements: string;
+}
+
+export function audioBlock(audio: AudioBlockInput): Record<string, unknown> {
+  return {
+    mode: audio.mode,
+    speech: audio.speech,
+    /** verbose | brief | tones - wie viel vor jedem Clip gesprochen wurde. */
+    announcements: audio.announcements,
+    note: "Announcements play before each clip and are in no file. The clips carry no audio track.",
+  };
+}
+
+export interface CameraBlockInput {
+  cameraLabel: string;
+  isFrontFacing: boolean;
+  cameraSettings: MediaTrackSettings;
+  cameraProbe: CameraProbe | null;
+  frameRateFloor: number | null;
+}
+
+export function cameraBlock(input: CameraBlockInput): Record<string, unknown> {
+  return {
+    label: input.cameraLabel,
+    isFrontFacing: input.isFrontFacing,
+    width: input.cameraSettings.width ?? null,
+    height: input.cameraSettings.height ?? null,
+    frameRate: input.cameraSettings.frameRate ?? null,
+    deviceId: input.cameraSettings.deviceId ?? null,
+    facingMode: input.cameraSettings.facingMode ?? null,
+    resizeMode: input.cameraProbe?.delivered.resizeMode ?? null,
+    offered: input.cameraProbe?.offered ?? null,
+    offeredFactor: input.cameraProbe?.videoFactor ?? null,
+    /** Als harte Bedingung verlangte Mindestbildrate, `null` wenn keine
+     *  durchsetzbar war. `frameRate` daneben ist die Zusage der Kamera. */
+    frameRateFloor: input.frameRateFloor,
+  };
+}
+
+/** Kopf eines Positionseintrags - Label immer Englisch plus Ansagesprache. */
+export function positionHead(spec: PositionSpec, locale: Locale): Record<string, unknown> {
+  return {
+    id: spec.id,
+    index: spec.index,
+    slug: positionSlug(spec),
+    label: positionLabelIn("en", spec),
+    labelSpoken: positionLabelIn(locale, spec),
+  };
+}
+
 export function buildVideoManifest(input: VideoManifestInput): Record<string, unknown> {
   const kept = [...input.clips.values()];
   const recordedMs = kept.reduce((sum, c) => sum + c.captured.recording.durationMs, 0);
@@ -150,46 +269,18 @@ export function buildVideoManifest(input: VideoManifestInput): Record<string, un
     manifestVersion: VIDEO_MANIFEST_VERSION,
     /** Sagt einem Leser sofort, welche Art Buendel er vor sich hat. */
     profile: "guided-video-clips",
-    protocol: {
-      id: "expression-set-12",
-      variant: "guided-clips-3x1s",
-      description:
-        "Twelve standardised facial expressions, one clip per position: a second at rest, three one-second holds, a second at rest. Cued acoustically; the announcement runs before the clip and is in no file.",
-      repetitions: REPETITIONS,
-      holdMs: HOLD_MS,
-      releaseMs: RELEASE_MS,
-      neutralHoldMs: NEUTRAL_HOLD_MS,
-      leadMs: LEAD_MS,
-      tailMs: TAIL_MS,
-    },
-    session: {
+    protocol: protocolBlock(),
+    session: sessionBlock({
       locale: input.locale,
       startedAt: input.startedAt,
       endedAt: input.endedAt,
-      /** Ganze Sitzung, mit Ansagen, Wartezeiten und verworfenen Versuchen. */
-      wallMs: Math.round(input.wallMs),
-      /** Summe der behaltenen Clips - so viel Video liegt im Paket. */
-      recordedMs: Math.round(recordedMs),
-      clipsPlanned: POSITIONS.length,
+      wallMs: input.wallMs,
+      recordedMs,
       clipsRecorded: kept.length,
-      attempts: input.attempts.length,
+      attempts: input.attempts,
       abortedReason: input.abortedReason,
-      /** Tatsaechliche Reihenfolge, verworfene Versuche eingeschlossen. */
-      clipOrder: input.attempts.map((a) => ({
-        id: a.id,
-        attempt: a.attempt,
-        kept: a.kept,
-        discardReason: a.discardReason,
-        startedAtEpochMs: a.startedAtEpochMs,
-        durationMs: Math.round(a.durationMs),
-      })),
-    },
-    timebase: {
-      origin: "clip-start",
-      clock: "performance.now",
-      unit: "ms",
-      note: "Every clip has its own zero. All times under positions[] are relative to that clip; positions[].timebase carries its wall-clock anchor. Cue times are measured, not planned - plannedMs states what was asked for.",
-    },
+    }),
+    timebase: TIMEBASE_BLOCK,
     capture: {
       /** Gemeinsames Profil - eine Kamera, ein Zuschnitt, alle Clips gleich. */
       video: {
@@ -230,22 +321,7 @@ export function buildVideoManifest(input: VideoManifestInput): Record<string, un
             }
           : null,
       },
-      camera: {
-        label: input.cameraLabel,
-        isFrontFacing: input.isFrontFacing,
-        width: input.cameraSettings.width ?? null,
-        height: input.cameraSettings.height ?? null,
-        frameRate: input.cameraSettings.frameRate ?? null,
-        deviceId: input.cameraSettings.deviceId ?? null,
-        facingMode: input.cameraSettings.facingMode ?? null,
-        resizeMode: input.cameraProbe?.delivered.resizeMode ?? null,
-        offered: input.cameraProbe?.offered ?? null,
-        offeredFactor: input.cameraProbe?.videoFactor ?? null,
-        /** Als harte Bedingung verlangte Mindestbildrate, `null` wenn keine
-         *  durchsetzbar war. `frameRate` daneben ist die Zusage der Kamera -
-         *  was ankam, steht je Clip in `video.sourceFrameRate`. */
-        frameRateFloor: input.frameRateFloor,
-      },
+      camera: cameraBlock(input),
       alignment: {
         holdMs: ALIGN_HOLD_MS,
         analysisEdge: input.analysisEdge,
@@ -273,13 +349,7 @@ export function buildVideoManifest(input: VideoManifestInput): Record<string, un
       mirrorApplied: false,
       sideMarkers: false,
     },
-    audio: {
-      mode: input.audio.mode,
-      speech: input.audio.speech,
-      /** verbose | brief | tones - wie viel vor jedem Clip gesprochen wurde. */
-      announcements: input.audio.announcements,
-      note: "Announcements play before each clip and are in no file. The clips carry no audio track.",
-    },
+    audio: audioBlock(input.audio),
     model: input.model
       ? {
           name: input.model.model,
@@ -302,15 +372,7 @@ function describePosition(
   clip: ClipResult | undefined,
   locale: Locale,
 ): Record<string, unknown> {
-  const head = {
-    id: spec.id,
-    index: spec.index,
-    slug: positionSlug(spec),
-    /** Immer Englisch, unabhaengig von der Anzeigesprache. */
-    label: positionLabelIn("en", spec),
-    /** Zusaetzlich in der Sprache, in der angesagt wurde. */
-    labelSpoken: positionLabelIn(locale, spec),
-  };
+  const head = positionHead(spec, locale);
 
   if (!clip) {
     // Nicht aufgenommen - die Sitzung endete vorher oder wurde abgebrochen.
