@@ -645,6 +645,16 @@ select {
   flex-wrap: wrap;
 }
 
+/* Farbskala der Winkelkarte (Angles-Seite). */
+.scale {
+  display: block;
+  width: 100%;
+  height: 10px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
 /* Einstellungs-Blatt. Die Optionen stehen hier statt in der Fussleiste -
    waehrend einer Sitzung sind sie ohnehin gesperrt, und auf dem Smartphone
    nahm die Leiste der Buehne den Platz weg. */

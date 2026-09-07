@@ -273,6 +273,51 @@ export const de: Dictionary = {
   "basic.fullFrame.title":
     "Zeichnet das ungeschnittene Kamerabild auf. Rückfallweg, falls die zugeschnittene Aufnahme auf diesem Gerät nicht trägt – das Ausschnittrechteck steht weiterhin im Manifest.",
 
+  // ---------------------------------------------- Winkelkarte (Angles-Seite)
+  "app.anglesTitle": "Winkelkarte",
+  "app.anglesNote":
+    "Referenzfreie Asymmetriewinkel nach Heinrich et al. 2026 – 225 gespiegelte Landmark-Paare, an der Mittellinie ausgerichtet, blau bei 0° bis rot bei 5°. Alles bleibt auf diesem Gerät.",
+  "nav.angles": "Winkelkarte",
+  "angles.statusReady": "Bereit. Kamera starten oder in den Einstellungen Bilddateien analysieren.",
+  "angles.live": "Live – wer gerade in die Kamera schaut, bekommt die ehrlichste Karte.",
+  "angles.noFace": "Kein Gesicht erkannt.",
+  "angles.captureHint": "Ausdruck halten, dann Aufnehmen drücken.",
+  "angles.scoreAll": "Score, alle Paare",
+  "angles.scoreRegional": "Score, Augen/Nase/Mund",
+  "angles.eyes": "Augen",
+  "angles.nose": "Nase",
+  "angles.mouth": "Mund",
+  "angles.other": "Übrige",
+  "angles.tilt": "Neigung der Mittellinie",
+  "angles.legend": "Mittlerer Betragswinkel der Paarlinien: blau 0° bis rot 5°",
+  "angles.pairSet": "Paarsatz",
+  "angles.pairSet.all": "Alle 225 Paare",
+  "angles.pairSet.regional": "Augen, Nase, Mund",
+  "angles.pairSet.title":
+    "Welche Landmark-Paare in Score und Karte eingehen. Die 91 informativen Paare des Papers sind nicht veröffentlicht; der regionale Satz ist die Näherung dieses Werkzeugs.",
+  "angles.size": "Kameragröße",
+  "angles.size.title":
+    "Lange Kante der Kamerabetriebsart. Das gespeicherte Foto behält sie; die Analyse läuft auf einer Kopie mit höchstens 1600 px.",
+  "angles.files": "Bilder analysieren",
+  "angles.files.title":
+    "Lässt dieselbe Kette über Fotodateien laufen – ein Gesicht je Bild. Die Ergebnisse landen in der Liste und im Export.",
+  "angles.filesDone": "{ok} von {total} Bildern analysiert",
+  "angles.captured": "{label}: {score}°",
+  "angles.positions": "Ablauf",
+  "angles.results": "Bilddateien",
+  "angles.sequenceDone": "Ablauf beendet – {count} Aufnahmen. Als ZIP sichern oder neu beginnen.",
+  "angles.saved": "Gespeichert: {count} Aufnahmen, {total} MB",
+  "angles.snapshot": "Momentaufnahme {n}",
+  "btn.sequence": "Ablauf starten",
+  "btn.finish": "Beenden",
+  "anglesBundle.title": "Winkelkarten-Aufnahme",
+  "anglesBundle.intro":
+    "Gesichtsasymmetrie als Winkelkarten nach Heinrich et al. (Bioengineering 2026;13:426): 478 MediaPipe-Landmarks, an der Mittellinie ausgerichtet, ein Winkel je gespiegeltem Landmark-Paar. Der Score ist der mittlere Betragswinkel.",
+  "anglesBundle.files":
+    "je Aufnahme: Foto (nur bei Kameraaufnahmen), <name>_anglemap.png (Karte ohne Foto), <name>_landmarks.json (478 rohe Landmarks)",
+  "anglesBundle.tables": "angles.csv (eine Zeile je Aufnahme und Paar), scores.csv (eine Zeile je Aufnahme)",
+  "anglesBundle.manifest": "manifest.json – Methode, Version der Paartabelle, Kamera, Gerät, Scores je Aufnahme",
+
   // ------------------------------------------------------ Einstellungs-Blatt
   "settings.open": "Einstellungen",
   "settings.title": "Einstellungen",
