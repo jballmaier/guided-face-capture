@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Angle map</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="bar">
+        <h1><span data-i18n="app.anglesTitle">Angle map</span> <span class="tag" data-i18n="app.tag">Prototype</span></h1>
+        <p class="note" data-i18n="app.anglesNote"></p>
+
+        <div class="viewopts">
+          <a class="navlink" href="./index.html" data-i18n="nav.full">Live analysis</a>
+          <a class="navlink" href="./basic.html" data-i18n="nav.basic">Guided video</a>
+          <a class="navlink" href="./plain.html" data-i18n="nav.plain">Video only</a>
+          <label class="field checkbox" data-i18n-title="view.light.title">
+            <input type="checkbox" id="toggle-light" />
+            <span data-i18n="view.light">Screen light</span>
+          </label>
+        </div>
+      </header>
+
+      <main>
+        <section class="stage" id="stage">
+          <video id="preview" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+
+          <div class="stage-empty" id="stage-empty">
+            <p data-i18n="stage.empty">Camera not started yet.</p>
+          </div>
+
+          <div class="prompt" id="prompt" hidden>
+            <div class="prompt-step" id="prompt-step"></div>
+            <div class="prompt-title" id="prompt-title"></div>
+            <div class="prompt-instruction" id="prompt-instruction"></div>
+            <div class="progress"><div class="progress-fill" id="progress-fill"></div></div>
+          </div>
+
+          <div class="sidemark left" id="mark-left"></div>
+          <div class="sidemark right" id="mark-right"></div>
+
+          <div class="hints" id="hints"></div>
+        </section>
+
+        <aside class="panel">
+          <h2 data-i18n="debug.readout">Measurements</h2>
+          <dl class="readout" id="readout"></dl>
+          <canvas class="scale" id="scale" width="256" height="10"></canvas>
+          <p class="muted small" data-i18n="angles.legend"></p>
+
+          <h3 data-i18n="angles.positions">Sequence</h3>
+          <ol class="poslist" id="poslist"></ol>
+
+          <h3 data-i18n="angles.results">Image files</h3>
+          <ol class="poslist" id="filelist"></ol>
+        </aside>
+      </main>
+
+      <footer class="bar controls">
+        <button id="btn-start" type="button" data-i18n="btn.start">Start camera</button>
+        <button id="btn-sequence" type="button" hidden data-i18n="btn.sequence">Start sequence</button>
+        <button id="btn-shutter" type="button" hidden data-i18n="btn.shutter">Capture now</button>
+        <button id="btn-skip" type="button" class="ghost" hidden data-i18n="btn.skip">Skip</button>
+        <button id="btn-finish" type="button" class="ghost" hidden data-i18n="btn.finish">Finish</button>
+        <button id="btn-export" type="button" hidden data-i18n="btn.export">Save as ZIP</button>
+        <button id="btn-again" type="button" class="ghost" hidden data-i18n="btn.again">New recording</button>
+        <button id="btn-settings" type="button" class="ghost" data-i18n="settings.open">Settings</button>
+
+        <span class="status" id="status"></span>
+      </footer>
+
+      <dialog id="settings" class="sheet">
+        <h2 data-i18n="settings.title">Settings</h2>
+        <div class="sheet-fields">
+          <label class="field">
+            <span data-i18n="app.language">Language</span>
+            <select id="locale-select"></select>
+          </label>
+          <label class="field">
+            <span data-i18n="field.camera">Camera</span>
+            <select id="camera-select" disabled></select>
+          </label>
+          <label class="field" data-i18n-title="angles.size.title">
+            <span data-i18n="angles.size">Camera size</span>
+            <select id="size-select">
+              <option value="1080">1080</option>
+              <option value="1920" selected>1920</option>
+              <option value="0" data-i18n="plain.sizeMax">Maximum</option>
+            </select>
+          </label>
+          <label class="field" data-i18n-title="angles.pairSet.title">
+            <span data-i18n="angles.pairSet">Pair set</span>
+            <select id="pairset-select">
+              <option value="all" selected data-i18n="angles.pairSet.all">All 225 pairs</option>
+              <option value="regional" data-i18n="angles.pairSet.regional">Eyes, nose, mouth</option>
+            </select>
+          </label>
+          <label class="field" data-i18n-title="angles.files.title">
+            <span data-i18n="angles.files">Analyse images</span>
+            <input type="file" id="file-input" accept="image/*" multiple />
+          </label>
+        </div>
+        <button id="btn-settings-close" type="button" class="ghost" data-i18n="settings.close">Close</button>
+      </dialog>
+    </div>
+
+    <script type="module" src="/src/angles/main.ts"></script>
+  </body>
+</html>

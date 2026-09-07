@@ -275,6 +275,51 @@ export const en = {
   "basic.fullFrame.title":
     "Records the uncropped camera image. Fallback if cropped recording fails on this device - the crop rectangle is still written to the manifest.",
 
+  // ------------------------------------------------- Angle map (angles page)
+  "app.anglesTitle": "Angle map",
+  "app.anglesNote":
+    "Reference-free asymmetry angles after Heinrich et al. 2026 - 225 mirrored landmark pairs, midline-aligned, blue at 0° to red at 5°. Everything stays on this device.",
+  "nav.angles": "Angle map",
+  "angles.statusReady": "Ready. Start the camera, or analyse image files from the settings.",
+  "angles.live": "Live - looking straight into the camera gives the truest map.",
+  "angles.noFace": "No face detected.",
+  "angles.captureHint": "Hold the expression, then press Capture.",
+  "angles.scoreAll": "Score, all pairs",
+  "angles.scoreRegional": "Score, eyes/nose/mouth",
+  "angles.eyes": "Eyes",
+  "angles.nose": "Nose",
+  "angles.mouth": "Mouth",
+  "angles.other": "Other",
+  "angles.tilt": "Midline tilt",
+  "angles.legend": "Mean |angle| of the pair lines: blue 0° to red 5°",
+  "angles.pairSet": "Pair set",
+  "angles.pairSet.all": "All 225 pairs",
+  "angles.pairSet.regional": "Eyes, nose, mouth",
+  "angles.pairSet.title":
+    "Which landmark pairs feed the score and the map. The paper's 91 informative pairs are unpublished; the regional set is this tool's approximation.",
+  "angles.size": "Camera size",
+  "angles.size.title":
+    "Long edge of the camera mode. The saved photo keeps it; the analysis runs on a copy of at most 1600 px.",
+  "angles.files": "Analyse images",
+  "angles.files.title":
+    "Runs the same pipeline over photo files - one face per image. Results join the list and the export.",
+  "angles.filesDone": "{ok} of {total} images analysed",
+  "angles.captured": "{label}: {score}°",
+  "angles.positions": "Sequence",
+  "angles.results": "Image files",
+  "angles.sequenceDone": "Sequence finished - {count} captures. Save as ZIP or start again.",
+  "angles.saved": "Saved: {count} captures, {total} MB",
+  "angles.snapshot": "Snapshot {n}",
+  "btn.sequence": "Start sequence",
+  "btn.finish": "Finish",
+  "anglesBundle.title": "Angle map capture",
+  "anglesBundle.intro":
+    "Facial asymmetry as angle maps after Heinrich et al. (Bioengineering 2026;13:426): 478 MediaPipe landmarks, midline-aligned, one angle per mirrored landmark pair. The score is the mean absolute angle.",
+  "anglesBundle.files":
+    "per capture: photo (camera captures only), <name>_anglemap.png (map without photo), <name>_landmarks.json (478 raw landmarks)",
+  "anglesBundle.tables": "angles.csv (one row per capture and pair), scores.csv (one row per capture)",
+  "anglesBundle.manifest": "manifest.json - method, pair table version, camera, device, scores per capture",
+
   // ---------------------------------------------------------- Settings sheet
   "settings.open": "Settings",
   "settings.title": "Settings",

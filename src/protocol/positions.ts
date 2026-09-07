@@ -272,6 +272,23 @@ export const POSITIONS: readonly PositionSpec[] = [
   },
 ];
 
+/**
+ * Die neun Ausdruecke des Winkelkarten-Papers (Heinrich et al., Bioengineering
+ * 2026, 13:426) in dessen Reihenfolge - das aeltere 9-Foto-Schema, eine
+ * Teilmenge der zwoelf Positionen.
+ */
+export const EXPRESSION_SET_9: readonly PositionId[] = [
+  "neutral",
+  "eye_closure_gentle",
+  "eye_closure_forced",
+  "forehead_wrinkle",
+  "nose_wrinkle",
+  "smile_closed",
+  "smile_teeth",
+  "lip_pucker",
+  "mouth_corners_down",
+];
+
 export function positionById(id: PositionId): PositionSpec {
   const found = POSITIONS.find((p) => p.id === id);
   if (!found) throw new Error(`Unbekannte Position: ${id}`);

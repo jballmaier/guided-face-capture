@@ -56,6 +56,7 @@ export default defineConfig(({ mode }) => ({
         main: resolve(__dirname, "index.html"),
         basic: resolve(__dirname, "basic.html"),
         plain: resolve(__dirname, "plain.html"),
+        angles: resolve(__dirname, "angles.html"),
       },
     },
   },
